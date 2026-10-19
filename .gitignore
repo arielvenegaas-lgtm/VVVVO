@@ -1,0 +1,20 @@
+# Build outputs
+xenon/build/
+xenon/*.elf
+xenon/*.elf32
+xenon/*.map
+display_test/build/
+display_test/*.elf
+display_test/*.elf32
+poc/build/
+*.o
+*.d
+*.s
+
+# User-supplied, proprietary game assets (never commit)
+data/
+user/
+
+# Editor / OS noise
+.DS_Store
+*~
