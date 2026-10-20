@@ -45,3 +45,8 @@ public:
 	void stop();
 	void Release();
 };
+
+// Deferred sound startup. Called from main() *after* FILESYSTEM_init(): it
+// registers the effect file list and decodes them. Never call this from a
+// global constructor (must run after the FAT/USB filesystem is up).
+void SoundSystem_Startup(void);

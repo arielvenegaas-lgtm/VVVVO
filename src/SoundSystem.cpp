@@ -53,9 +53,15 @@ static const int kSfxCount = (int)(sizeof(kSfxNames) / sizeof(kSfxNames[0]));
 static const char *kMappedSfx[64];
 static int g_registered = 0;
 
+// Sound-effect table registration touches the filesystem (MapPath resolves
+// volume-relative paths and XenonAudio_Preload reads+decodes every WAV), so it
+// MUST NOT run from a global constructor: `CSound sfx;` is a file-scope object
+// whose constructor runs during static initialization, before main() and
+// before FILESYSTEM_init(). Calling this early walked the FAT/USB driver in an
+// uninitialized state and stalled startup right after the video-init message.
+// main() now calls SoundSystem_Startup() explicitly, after the FS is up.
 static void RegisterSfxOnce() {
     if (g_registered) return;
-    g_registered = 1;
     // MapPath returns a pointer into a small rotating buffer, so copy each
     // result into stable storage before registering the list.
     static char storage[64][256];
@@ -66,8 +72,19 @@ static void RegisterSfxOnce() {
         kMappedSfx[i] = storage[i];
     }
     XenonAudio_SetSfxList(kMappedSfx, kSfxCount);
+    g_registered = 1;
+}
+
+// Deferred startup: safe to call only after FILESYSTEM_init(). Brings up the
+// DAC, registers the effect names, and decodes them once. All of this is
+// deferred out of the constructors because `CSound sfx;` is a file-scope
+// object: its constructor runs during static initialization, before main(),
+// before the Xenos framebuffer is up and before the FAT/USB filesystem exists.
+void SoundSystem_Startup(void) {
+    XenonAudio_Init();
+    RegisterSfxOnce();
 #if defined(XENON)
-    XenonAudio_Preload();   // decode now; avoid a hitch on the first effect use
+    XenonAudio_Preload();
 #endif
 }
 
@@ -99,8 +116,9 @@ SoundTrack::SoundTrack(const char* fileName)
 
 SoundSystem::SoundSystem()
 {
-    XenonAudio_Init();
-    RegisterSfxOnce();
+    // Intentionally empty: this object may be constructed during static
+    // initialization. All hardware/filesystem work is deferred to
+    // SoundSystem_Startup() (see below).
 }
 
 void SoundSystem::playMusic(MusicTrack* music)
@@ -132,8 +150,9 @@ bool hasmusic = false;
 
 CSound::CSound()
 {
-    XenonAudio_Init();
-    RegisterSfxOnce();
+    // Intentionally empty: `CSound sfx;` is a file-scope object constructed
+    // during static initialization. Do not touch the DAC or the filesystem
+    // here; SoundSystem_Startup() does that after boot has progressed.
 }
 
 void CSound::Create(int t, int p)

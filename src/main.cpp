@@ -44,8 +44,18 @@ int main()
 	{
 		for (;;) { } // no display: spin so the failure is obvious
 	}
+	// [1] Video is up. This is the first checkpoint we can display.
+	BootCheckpoint(1);
 
 	if(!FILESYSTEM_init()) fs::log("FATAL ERROR!!!");
+	BootCheckpoint(2);
+
+	// Sound effects are registered + decoded here, now that the FAT/USB
+	// filesystem is initialized. Doing this from the CSound global constructor
+	// (static init, before the FS existed) stalled boot. See SoundSystem.cpp.
+	SoundSystem_Startup();
+	BootCheckpoint(3);
+
 	srand(time(NULL));
 
 
@@ -55,9 +65,11 @@ int main()
         SDL_INIT_JOYSTICK |
         SDL_INIT_GAMECONTROLLER
     );
+	BootCheckpoint(4);
 
 	SDL_JoystickOpen(0);
 	SDL_GameControllerOpen(0);
+	BootCheckpoint(5);
 
 	
 
@@ -98,10 +110,12 @@ int main()
     MusicClass music;
     Game game;
     game.infocus = true;
+	BootCheckpoint(6);   // game objects constructed (asset PNGs loaded)
 
     graphics.MakeTileArray();
     graphics.MakeSpriteArray();
     graphics.maketelearray();
+	BootCheckpoint(7);   // tile/sprite/teleporter arrays built
 
     graphics.images.push_back(graphics.grphx.im_image0);
     graphics.images.push_back(graphics.grphx.im_image1);
@@ -122,6 +136,7 @@ int main()
     graphics.backBuffer = SDL_CreateRGBSurface(SDL_SWSURFACE, 320, 240, 32, fmt->Rmask, fmt->Gmask, fmt->Bmask, fmt->Amask);
     SDL_SetSurfaceBlendMode(graphics.backBuffer, SDL_BLENDMODE_NONE);
     graphics.Makebfont();
+	BootCheckpoint(8);   // back buffer + bitmap font ready
 
     graphics.foregroundBuffer = SDL_CreateRGBSurface(SDL_SWSURFACE, 320, 240, fmt->BitsPerPixel, fmt->Rmask, fmt->Gmask, fmt->Bmask, fmt->Amask);
     SDL_SetSurfaceBlendMode(graphics.foregroundBuffer, SDL_BLENDMODE_NONE);
@@ -182,14 +197,23 @@ int main()
 
     EntityClass obj;
     obj.init();
+	BootCheckpoint(9);   // entities initialised; about to enter the main loop
 
     volatile Uint32 time, timePrev = 0;
     game.infocus = true;
     key.isActive = true;
 
+    // Boot diagnostics counter (see BootCheckpoint). Local so it cannot collide
+    // with any real game state.
+    int bootLoop = 0;
+
     while(!key.quitProgram)
     {
         time = SDL_GetTicks();
+
+        // Boot heartbeat: mark the first few loop iterations (and thus that the
+        // main loop was actually reached) without flooding every frame.
+        if (bootLoop < 3) { BootCheckpoint(10 + bootLoop); bootLoop++; }
 
         //framerate limit to 30
         Uint32 timetaken = time - timePrev;
@@ -224,6 +248,7 @@ int main()
             case PRELOADER:
                 states::Preloader::input(key, game);
                 states::Preloader::render(graphics, game);
+                if (bootLoop <= 12) { BootCheckpoint(20 + bootLoop); bootLoop++; }
                 break;
 
             case EDITORMODE:

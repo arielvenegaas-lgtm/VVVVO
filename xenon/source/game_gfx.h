@@ -18,3 +18,8 @@ void VvvvoGfx_Clear(uint32_t argb);
 
 // Diagnostic text overlay (uses the port's built-in 5x7 font).
 void VvvvoGfx_Text(int x, int y, int scale, uint32_t argb, const char *text);
+
+// Startup diagnostics: draw a small numbered "boot: N" marker in the top-left
+// of the scan-out so boot progress is visible even before the game renders.
+// Cheap enough to call at each startup stage; not intended for per-frame use.
+void BootCheckpoint(int n);

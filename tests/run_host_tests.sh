@@ -80,3 +80,6 @@ echo "== test_music_host (Ogg Vorbis decode + resample) =="
 echo
 echo "== test_fat32_host (FAT32 driver vs real image) =="
 "$binary" "$img"
+
+echo
+bash "$here/test_startup_order_host.sh"

@@ -35,6 +35,15 @@ dependency with a libXenon one.
 > stream ends. Music and effects share the DAC ring. *(Audio output still needs
 > hardware confirmation; the decode/mix path is covered by host tests.)*
 
+> **Boot ordering.** All hardware/filesystem work (DAC init, effect preload,
+> asset reads) happens in `main()` *after* `FILESYSTEM_init()`. It is deliberately
+> not done from global constructors such as `CSound sfx;` (file-scope in
+> `src/Input.cpp`), whose constructors run during static initialization, before
+> the framebuffer and FAT volume exist. `main()` also emits numbered
+> `BootCheckpoint(n)` markers ("boot: 1 2 3 …") on the scan-out so a boot stall
+> can be localised to a specific stage. *(Boot progress itself needs hardware
+> confirmation; `tests/test_startup_order_host.sh` guards the ordering.)*
+
 ---
 
 ## What was reused from XVVVVX

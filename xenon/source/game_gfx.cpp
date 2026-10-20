@@ -35,6 +35,44 @@ void VvvvoGfx_Text(int x, int y, int scale, uint32_t argb, const char *text) {
     if (g_gfx) Gfx_DrawText(g_gfx, x, y, scale, argb, text);
 }
 
+/* Startup diagnostics. Draws an accumulating "boot: 1 2 3 ..." line in the
+ * top-left corner of the scan-out and presents it immediately, so boot progress
+ * is visible on hardware even if the game never reaches its first frame. */
+void BootCheckpoint(int n) {
+    if (!g_gfx) return;
+
+    const int scale  = 2;
+    const int margin = 8;
+
+    /* Accumulating "boot: <n> <n> ..." string, so a screenshot shows how far
+     * boot got. Fixed storage: no allocation, no I/O. */
+    static char buf[96];
+    static int  len = 0;
+
+    /* Do NOT clear the scan-out here: this is also called from inside the
+     * preloader/game loop, and clearing would erase the frame the game just
+     * rendered. The shadow is already black at boot. */
+    if (len > (int)sizeof(buf) - 6) len = (int)sizeof(buf) - 6;
+
+    if (len == 0) {
+        const char *hdr = "boot:";
+        while (*hdr) buf[len++] = *hdr++;
+        buf[len++] = ' ';
+    }
+
+    char tmp[12];
+    int t = 0;
+    int v = n;
+    if (v == 0) tmp[t++] = '0';
+    while (v > 0 && t < (int)sizeof(tmp)) { tmp[t++] = (char)('0' + (v % 10)); v /= 10; }
+    for (int i = t - 1; i >= 0; --i) buf[len++] = tmp[i];
+    buf[len++] = ' ';
+    buf[len]   = '\0';
+
+    Gfx_DrawText(g_gfx, margin, margin, scale, 0xFFFFFF00u, buf);
+    Gfx_Present(g_gfx);
+}
+
 /* One converted source row, reused for every duplicated scanline. VVVVVV's
  * screen is 320 px wide; the limit just keeps a stray huge surface safe. */
 static uint32_t s_line[2048];
