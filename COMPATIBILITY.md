@@ -39,10 +39,27 @@ dependency with a libXenon one.
 > asset reads) happens in `main()` *after* `FILESYSTEM_init()`. It is deliberately
 > not done from global constructors such as `CSound sfx;` (file-scope in
 > `src/Input.cpp`), whose constructors run during static initialization, before
-> the framebuffer and FAT volume exist. `main()` also emits numbered
-> `BootCheckpoint(n)` markers ("boot: 1 2 3 …") on the scan-out so a boot stall
-> can be localised to a specific stage. *(Boot progress itself needs hardware
-> confirmation; `tests/test_startup_order_host.sh` guards the ordering.)*
+> the framebuffer and FAT volume exist.
+>
+> **Loading screen.** `main()` draws a real `VvvvoGfx_LoadScreen(pct, stage)`
+> with the port's built-in 5x7 font, so progress text is visible before any PNG
+> has loaded. The percentage advances only when a stage actually completes
+> (mount, audio, input, each decoded asset, sprite arrays, save data). The
+> original fake `PRELOADER` animation is no longer entered. If a core asset is
+> missing or corrupt, `VvvvoGfx_ErrorScreen()` reports it readably instead of
+> leaving a black screen.
+>
+> **FAT32 mount is O(1).** `Fat32_MountVolume()` trusts the FSInfo free-cluster
+> hint instead of scanning the whole FAT. The old scan issued one synchronous
+> USB read per 512-byte FAT sector and took ~10 minutes on a multi-GB stick.
+> `Fat32_RecountFree()` is available if an exact count is ever needed. File reads
+> now batch one USB transfer per cluster.
+>
+> **`fs::*` targets the mounted volume.** The inline helpers in
+> `src/filesystem.h` pass `FsVolume()` to the `Fat32V_*` API; passing `NULL` made
+> every call a no-op (so `fs::exists()` was always false and logging silently
+> did nothing). *(All of the above still needs hardware confirmation; the
+> ordering, mount-cost and `fs::` behaviour are covered by host tests.)*
 
 ---
 

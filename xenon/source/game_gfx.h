@@ -23,3 +23,12 @@ void VvvvoGfx_Text(int x, int y, int scale, uint32_t argb, const char *text);
 // of the scan-out so boot progress is visible even before the game renders.
 // Cheap enough to call at each startup stage; not intended for per-frame use.
 void BootCheckpoint(int n);
+
+// Full-screen boot/loading screen drawn with the built-in 5x7 font (so it works
+// before any PNG has loaded). `pct` is 0..100 of genuinely completed work and
+// `stage` names the current step. Clears and presents the scan-out.
+void VvvvoGfx_LoadScreen(int pct, const char *stage);
+
+// Full-screen readable error (e.g. missing/corrupt assets). Clears and presents
+// the scan-out. `detail` may be NULL.
+void VvvvoGfx_ErrorScreen(const char *title, const char *detail);

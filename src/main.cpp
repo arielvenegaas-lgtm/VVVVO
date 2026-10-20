@@ -44,17 +44,22 @@ int main()
 	{
 		for (;;) { } // no display: spin so the failure is obvious
 	}
-	// [1] Video is up. This is the first checkpoint we can display.
-	BootCheckpoint(1);
+	// Real loading screen, drawn with the built-in font so it is visible before
+	// any game asset exists. Progress advances only when a stage actually
+	// completes.
+	VvvvoGfx_LoadScreen(2, "Video ready");
 
-	if(!FILESYSTEM_init()) fs::log("FATAL ERROR!!!");
-	BootCheckpoint(2);
+	// Mount the FAT32 volume. This is fast now: Fat32_MountVolume reads the
+	// FSInfo hint instead of scanning the whole FAT (which took minutes on
+	// large USB sticks).
+	int fs_ok = FILESYSTEM_init();
+	VvvvoGfx_LoadScreen(8, fs_ok ? "Filesystem ready" : "Filesystem unavailable");
 
 	// Sound effects are registered + decoded here, now that the FAT/USB
 	// filesystem is initialized. Doing this from the CSound global constructor
 	// (static init, before the FS existed) stalled boot. See SoundSystem.cpp.
 	SoundSystem_Startup();
-	BootCheckpoint(3);
+	VvvvoGfx_LoadScreen(14, "Audio ready");
 
 	srand(time(NULL));
 
@@ -65,11 +70,10 @@ int main()
         SDL_INIT_JOYSTICK |
         SDL_INIT_GAMECONTROLLER
     );
-	BootCheckpoint(4);
 
 	SDL_JoystickOpen(0);
 	SDL_GameControllerOpen(0);
-	BootCheckpoint(5);
+	VvvvoGfx_LoadScreen(20, "Input ready");
 
 	
 
@@ -105,17 +109,20 @@ int main()
 	fs::log("\t\t\n");
 	fs::log("\t\t\n");
 
+	// Loading the PNG assets happens in the Graphics constructor; LoadImage()
+	// advances this screen once per decoded file (see GraphicsResources.cpp).
+	VvvvoGfx_LoadScreen(24, "Loading graphics");
+
     Graphics graphics;
 	CSound sfx;
     MusicClass music;
     Game game;
     game.infocus = true;
-	BootCheckpoint(6);   // game objects constructed (asset PNGs loaded)
+	VvvvoGfx_LoadScreen(60, "Building sprites");
 
     graphics.MakeTileArray();
     graphics.MakeSpriteArray();
     graphics.maketelearray();
-	BootCheckpoint(7);   // tile/sprite/teleporter arrays built
 
     graphics.images.push_back(graphics.grphx.im_image0);
     graphics.images.push_back(graphics.grphx.im_image1);
@@ -133,10 +140,10 @@ int main()
     graphics.images.push_back(graphics.grphx.im_image12);
 
     const SDL_PixelFormat* fmt = gameScreen.GetFormat();
+    VvvvoGfx_LoadScreen(78, "Allocating buffers");
     graphics.backBuffer = SDL_CreateRGBSurface(SDL_SWSURFACE, 320, 240, 32, fmt->Rmask, fmt->Gmask, fmt->Bmask, fmt->Amask);
     SDL_SetSurfaceBlendMode(graphics.backBuffer, SDL_BLENDMODE_NONE);
     graphics.Makebfont();
-	BootCheckpoint(8);   // back buffer + bitmap font ready
 
     graphics.foregroundBuffer = SDL_CreateRGBSurface(SDL_SWSURFACE, 320, 240, fmt->BitsPerPixel, fmt->Rmask, fmt->Gmask, fmt->Bmask, fmt->Amask);
     SDL_SetSurfaceBlendMode(graphics.foregroundBuffer, SDL_BLENDMODE_NONE);
@@ -152,18 +159,58 @@ int main()
 	graphics.tempBuffer = SDL_CreateRGBSurface(SDL_SWSURFACE, 320, 240, fmt->BitsPerPixel, fmt->Rmask, fmt->Gmask, fmt->Bmask, fmt->Amask);
     SDL_SetSurfaceBlendMode(graphics.tempBuffer, SDL_BLENDMODE_NONE);
 
-    game.gamestate = PRELOADER;
+    // Skip the original fake preloader: all real loading already happened
+    // above with genuine progress, so go straight to the title screen instead
+    // of animating a second, fake 0-100%.
+    game.gamestate = TITLEMODE;
 
     game.menustart = false;
     game.mainmenu = 0;
     game.shouldQuit = false;
 
     KeyPoll key;
+    key.isActive = true;
+
+    /* Validate the core assets before entering the game. A missing or corrupt
+       PNG used to show up only as an unexplained black screen, because the
+       bitmap font and menu sprites silently became blank surfaces. */
+    {
+        struct { const char *name; SDL_Surface *s; } need[] = {
+            {"tiles.png",      graphics.grphx.im_tiles},
+            {"tiles2.png",     graphics.grphx.im_tiles2},
+            {"sprites.png",    graphics.grphx.im_sprites},
+            {"entcolours.png", graphics.grphx.im_entcolours},
+            {"font.png",       graphics.grphx.im_bfont},
+            {"teleporter.png", graphics.grphx.im_teleporter},
+            {"image0.png",     graphics.grphx.im_image0},
+            {"image1.png",     graphics.grphx.im_image1},
+            {"image2.png",     graphics.grphx.im_image2},
+        };
+        char missing[180];
+        missing[0] = '\0';
+        int nmiss = 0;
+        for (unsigned i = 0; i < sizeof(need) / sizeof(need[0]); ++i) {
+            if (need[i].s) continue;
+            nmiss++;
+            if (strlen(missing) + strlen(need[i].name) + 2 < sizeof(missing)) {
+                if (missing[0]) strcat(missing, " ");
+                strcat(missing, need[i].name);
+            }
+        }
+        if (nmiss) {
+            VvvvoGfx_ErrorScreen("Missing or corrupt assets", missing);
+            while (!key.quitProgram) { SDL_Delay(100); key.Poll(); }
+            SDL_Quit();
+            return 1;
+        }
+    }
+
     MapClass map;
 
     map.ypos = (700 - 29) * 8;
     map.bypos = map.ypos / 2;
 
+    VvvvoGfx_LoadScreen(92, "Loading save data");
     game.loadstats(map, graphics);
 
     if (game.usingmmmmmm == 0) music.usingmmmmmm = false;
@@ -197,23 +244,16 @@ int main()
 
     EntityClass obj;
     obj.init();
-	BootCheckpoint(9);   // entities initialised; about to enter the main loop
+
+    VvvvoGfx_LoadScreen(100, "Ready");
 
     volatile Uint32 time, timePrev = 0;
     game.infocus = true;
     key.isActive = true;
 
-    // Boot diagnostics counter (see BootCheckpoint). Local so it cannot collide
-    // with any real game state.
-    int bootLoop = 0;
-
     while(!key.quitProgram)
     {
         time = SDL_GetTicks();
-
-        // Boot heartbeat: mark the first few loop iterations (and thus that the
-        // main loop was actually reached) without flooding every frame.
-        if (bootLoop < 3) { BootCheckpoint(10 + bootLoop); bootLoop++; }
 
         //framerate limit to 30
         Uint32 timetaken = time - timePrev;
@@ -248,7 +288,6 @@ int main()
             case PRELOADER:
                 states::Preloader::input(key, game);
                 states::Preloader::render(graphics, game);
-                if (bootLoop <= 12) { BootCheckpoint(20 + bootLoop); bootLoop++; }
                 break;
 
             case EDITORMODE:

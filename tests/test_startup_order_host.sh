@@ -105,11 +105,55 @@ else
     bad "main() must call SoundSystem_Startup after FILESYSTEM_init (fs=$fs_line startup=$st_line)"
 fi
 
-# Boot checkpoints must be present so a future stall can be localised.
-if grep -q 'BootCheckpoint' "$main"; then
-    ok "main() emits boot checkpoints"
+# Boot must show a real loading screen drawn with the built-in font, not rely on
+# game assets (which is what made the earlier boot progress invisible).
+if grep -q 'VvvvoGfx_LoadScreen' "$main"; then
+    ok "main() draws the real loading screen"
 else
-    bad "main() has no boot checkpoints"
+    bad "main() does not call VvvvoGfx_LoadScreen"
+fi
+if grep -q 'VvvvoGfx_LoadScreen' "$root/src/GraphicsResources.cpp"; then
+    ok "asset loading advances per-file progress"
+else
+    bad "GraphicsResources.cpp does not advance loading progress"
+fi
+# The fake preloader must not be used as the post-load state any more.
+if grep -q 'game.gamestate = PRELOADER' "$main"; then
+    bad "main() still enters the fake PRELOADER state"
+else
+    ok "main() skips the fake preloader"
+fi
+
+# Mounting must not scan the whole FAT: on a large stick that is one USB
+# read per 512-byte sector and took minutes.
+fat="$root/xenon/source/fat32.c"
+if [ -f "$fat" ]; then
+    mount_body="$(extract_ctor "$fat" 'int Fat32_MountVolume')"
+    if printf '%s\n' "$mount_body" | grep -q 'CountFreeClusters'; then
+        bad "Fat32_MountVolume() scans the whole FAT (very slow)"
+    else
+        ok "Fat32_MountVolume() does not scan the whole FAT"
+    fi
+else
+    bad "missing $fat"
+fi
+
+# The fs:: wrappers must target the mounted volume, not NULL (passing NULL made
+# every call a silent no-op, so fs::exists() was always false).
+fsh="$root/xenon/source/filesystem.h"
+if [ -f "$fsh" ]; then
+    if grep -Eq 'Fat32V_[A-Za-z]+[[:space:]]*\([[:space:]]*NULL' "$fsh"; then
+        bad "filesystem.h passes NULL to Fat32V_* (fs::* becomes a no-op)"
+    else
+        ok "filesystem.h passes the mounted volume to Fat32V_*"
+    fi
+    if grep -q 'FsVolume()' "$fsh"; then
+        ok "filesystem.h uses FsVolume()"
+    else
+        bad "filesystem.h does not use FsVolume()"
+    fi
+else
+    bad "missing $fsh"
 fi
 
 echo

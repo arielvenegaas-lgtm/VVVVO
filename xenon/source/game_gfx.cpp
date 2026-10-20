@@ -73,6 +73,75 @@ void BootCheckpoint(int n) {
     Gfx_Present(g_gfx);
 }
 
+/* --- boot / loading screen ---------------------------------------------- */
+
+static int TextWidth(const char *s, int scale) {
+    int n = 0;
+    for (; s && *s; ++s) n += (6 * scale);
+    return n;
+}
+
+static void DrawCentered(const char *s, int y, int scale, uint32_t argb) {
+    int dw = (int)Gfx_Width(g_gfx);
+    int x = (dw - TextWidth(s, scale)) / 2;
+    if (x < 0) x = 0;
+    Gfx_DrawText(g_gfx, x, y, scale, argb, s);
+}
+
+static void Fill(uint32_t argb) { Gfx_Clear(g_gfx, argb); }
+
+void VvvvoGfx_LoadScreen(int pct, const char *stage) {
+    if (!g_gfx) return;
+    int dw = (int)Gfx_Width(g_gfx);
+    int dh = (int)Gfx_Height(g_gfx);
+
+    Fill(0xFF141428u);
+
+    DrawCentered("VVVVVV", dh / 4, 6, 0xFFFFFFFFu);
+    DrawCentered("Xbox 360 - libXenon", dh / 4 + 9 * 6, 2, 0xFFB0B0C8u);
+
+    /* Progress bar: outline + fill, centred. */
+    int bw = dw / 2; if (bw > 640) bw = 640; if (bw < 200) bw = 200;
+    int bh = 26;
+    int bx = (dw - bw) / 2;
+    int by = dh / 2 + 40;
+
+    Gfx_FillRect(g_gfx, bx - 3, by - 3, bw + 6, bh + 6, 0xFFFFFFFFu);
+    Gfx_FillRect(g_gfx, bx, by, bw, bh, 0xFF202040u);
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+    int fillw = (int)((long long)bw * pct / 100);
+    if (fillw > 0) Gfx_FillRect(g_gfx, bx, by, fillw, bh, 0xFF30C060u);
+
+    char pcttxt[16];
+    pcttxt[0] = (char)('0' + (pct / 100) % 10);
+    pcttxt[1] = (char)('0' + (pct / 10) % 10);
+    pcttxt[2] = '%';
+    pcttxt[3] = '\0';
+    /* Only show "100%" once actually complete. */
+    if (pct < 100) {
+        pcttxt[0] = (char)('0' + (pct / 10) % 10);
+        pcttxt[1] = '%';
+        pcttxt[2] = '\0';
+    }
+
+    if (stage) DrawCentered(stage, by + bh + 24, 3, 0xFFFFFFFFu);
+    DrawCentered(pcttxt, by + bh + 24 + 3 * 9, 2, 0xFFB0B0C8u);
+
+    Gfx_Present(g_gfx);
+}
+
+void VvvvoGfx_ErrorScreen(const char *title, const char *detail) {
+    if (!g_gfx) return;
+    int dh = (int)Gfx_Height(g_gfx);
+
+    Fill(0xFF200000u);
+    DrawCentered(title ? title : "ERROR", dh / 4, 4, 0xFFFF6060u);
+    if (detail && *detail) DrawCentered(detail, dh / 4 + 4 * 9 + 24, 2, 0xFFFFFFFFu);
+    DrawCentered("Check the USB drive and data/ folder.", dh - dh / 4, 2, 0xFFFFC040u);
+    Gfx_Present(g_gfx);
+}
+
 /* One converted source row, reused for every duplicated scanline. VVVVVV's
  * screen is 320 px wide; the limit just keeps a stray huge surface safe. */
 static uint32_t s_line[2048];

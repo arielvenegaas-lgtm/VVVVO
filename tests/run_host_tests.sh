@@ -82,4 +82,16 @@ echo "== test_fat32_host (FAT32 driver vs real image) =="
 "$binary" "$img"
 
 echo
+echo "== test_mount_reads_host (mount must not scan the whole FAT) =="
+bigimg="$work/fat_big.img"
+# Sparse 2 GiB volume: a full-FAT scan here would be thousands of sector reads.
+truncate -s 2G "$bigimg"
+mkfs.fat -F 32 -n VVVVOB "$bigimg" >/dev/null
+mmd -i "$bigimg" ::/data
+mcopy -i "$bigimg" "$work/big.bin" ::/data/big.bin
+gcc -O2 -g -Wall -Wextra -o "$work/test_mount_reads_host" \
+    "$here/test_mount_reads_host.c" "$root/xenon/source/fat32.c"
+"$work/test_mount_reads_host" "$bigimg"
+
+echo
 bash "$here/test_startup_order_host.sh"

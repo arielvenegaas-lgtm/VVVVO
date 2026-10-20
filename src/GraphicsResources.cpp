@@ -1,10 +1,16 @@
 #include "GraphicsResources.h"
 #include "FileSystemUtils.h"
 #include "filesystem.h"
+#include "game_gfx.h"
 #include "../lodepng/lodepng.h"
 #include "../lodepng/lodepng.c"
 #include <stdio.h>
 #include <stdlib.h>
+
+/* Number of asset files loaded through LoadImage(); used only to advance the
+ * boot loading screen with genuine progress. */
+static int s_images_loaded = 0;
+static const int kImagesTotal = 22;
 
 SDL_Surface* LoadImage(const char *filename, bool noBlend = true, bool noAlpha = false)
 {
@@ -54,6 +60,13 @@ SDL_Surface* LoadImage(const char *filename, bool noBlend = true, bool noAlpha =
             surface = convertedSurface;
         }
 		*/
+    }
+
+    ++s_images_loaded;
+    if (s_images_loaded <= kImagesTotal) {
+        char stage[48];
+        snprintf(stage, sizeof(stage), "Loading graphics %d/%d", s_images_loaded, kImagesTotal);
+        VvvvoGfx_LoadScreen(24 + (s_images_loaded * 50) / kImagesTotal, stage);
     }
 
     return surface;

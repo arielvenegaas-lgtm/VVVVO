@@ -68,8 +68,12 @@ int Fat32_MountVolume(Fat32 *fs);
 
 int      Fat32_IsWritable(const Fat32 *fs);
 uint64_t Fat32_TotalBytes(const Fat32 *fs);
-/* Free space in bytes (uses the cached free-cluster count computed at mount). */
+/* Free space in bytes (uses the FSInfo hint, or an upper bound if unknown). */
 uint64_t Fat32_FreeBytes(const Fat32 *fs);
+
+/* Explicitly rescans the whole FAT for an exact free-cluster count. This is
+ * slow on large volumes and is never done by Fat32_MountVolume(). */
+uint32_t Fat32_RecountFree(Fat32 *fs);
 
 /* --- directory / file operations (instance based) --- */
 

@@ -35,11 +35,19 @@ struct Fat32 {
     uint32_t clus_cnt;    /* data clusters, 0 if unknown */
     uint32_t next_free;   /* allocation hint cluster */
     uint32_t free_clus;   /* cached free cluster count */
+    int      free_known;  /* free_clus came from FSInfo (not a guess) */
 
     int mounted;
     int writable;
 
     uint8_t sec[SECSZ];   /* scratch sector */
+
+    /* One-sector FAT cache. Walking a cluster chain would otherwise issue a
+     * separate USB read per link; consecutive links almost always live in the
+     * same sector, so caching turns that into one read per 128 clusters. */
+    uint8_t  fat_cache[SECSZ];
+    uint32_t fat_cache_lba;
+    int      fat_cache_valid;
 };
 
 /* --- little-endian helpers --------------------------------------------- */
@@ -80,8 +88,12 @@ static uint32_t FatGet(Fat32 *fs, uint32_t clus) {
     uint32_t off = clus * 4u;
     uint32_t lba = fs->fat_start + off / SECSZ;
     uint32_t o   = off % SECSZ;
-    if (!ReadSec(fs, lba, fs->sec)) return FAT32_BAD;
-    return Rd32(fs->sec + o) & 0x0FFFFFFFu;
+    if (!fs->fat_cache_valid || fs->fat_cache_lba != lba) {
+        if (!ReadSec(fs, lba, fs->fat_cache)) return FAT32_BAD;
+        fs->fat_cache_lba = lba;
+        fs->fat_cache_valid = 1;
+    }
+    return Rd32(fs->fat_cache + o) & 0x0FFFFFFFu;
 }
 
 /* Unknown → treat as chain terminator (already in FatGet via FAT32_BAD). */
@@ -97,6 +109,8 @@ static int FatSet(Fat32 *fs, uint32_t clus, uint32_t val) {
         cur = (cur & 0xF0000000u) | (val & 0x0FFFFFFFu);
         Wr32(fs->sec + o, cur);
         if (!WriteSec(fs, lba, fs->sec)) return 0;
+        /* Drop the cache if we just wrote the cached sector. */
+        if (fs->fat_cache_valid && fs->fat_cache_lba == lba) fs->fat_cache_valid = 0;
     }
     return 1;
 }
@@ -223,11 +237,35 @@ static uint32_t CountFreeClusters(Fat32 *fs) {
     return free_clus;
 }
 
+#define FSINFO_LEAD  0x41615252u
+#define FSINFO_STRUC 0x61417272u
+
+/* Reads the free-cluster hint and next-free hint from the FSInfo sector.
+ * Returns 1 if the sector is valid and the free count is usable. FAT32's
+ * FSInfo exists precisely so a mount does not have to scan the entire FAT;
+ * scanning it costs one synchronous USB read per 128 clusters, which on a
+ * multi-gigabyte stick is tens of thousands of transactions (many minutes). */
+static int ReadFsInfo(Fat32 *fs, uint32_t *free_out, uint32_t *next_out) {
+    if (fs->fsinfo_sec == 0) return 0;
+    if (!ReadSec(fs, fs->fsinfo_sec, fs->sec)) return 0;
+    if (Rd32(fs->sec) != FSINFO_LEAD || Rd32(fs->sec + 484) != FSINFO_STRUC)
+        return 0;
+    uint32_t freec = Rd32(fs->sec + 488);
+    uint32_t nextc = Rd32(fs->sec + 492);
+    if (freec == 0xFFFFFFFFu) return 0;            /* "unknown" per spec */
+    if (fs->clus_cnt && freec > fs->clus_cnt) return 0;
+    if (free_out) *free_out = freec;
+    if (next_out) *next_out = nextc;
+    return 1;
+}
+
 int Fat32_MountVolume(Fat32 *fs) {
     if (!fs) return 0;
     fs->mounted = 0;
     fs->next_free = 2;
     fs->free_clus = 0;
+    fs->free_known = 0;
+    fs->fat_cache_valid = 0;
 
     int have = 0;
     if (LooksFat32(fs, 0)) {
@@ -251,7 +289,20 @@ int Fat32_MountVolume(Fat32 *fs) {
     }
     fs->mounted = 1;
     fs->writable = (fs->wr != 0);
-    fs->free_clus = CountFreeClusters(fs);
+
+    /* Never scan the FAT here. Prefer the FSInfo hint; otherwise leave the
+     * free count unknown (an optimistic upper bound is enough to permit
+     * allocation, and WriteFsInfo will not publish it as fact). */
+    uint32_t f_free = 0, f_next = 0;
+    if (ReadFsInfo(fs, &f_free, &f_next)) {
+        fs->free_clus = f_free;
+        fs->free_known = 1;
+        if (f_next >= 2u && (!fs->clus_cnt || f_next < 2u + fs->clus_cnt))
+            fs->next_free = f_next;
+    } else {
+        fs->free_clus = fs->clus_cnt;   /* unknown: do not block allocation */
+        fs->free_known = 0;
+    }
     return 1;
 }
 
@@ -261,6 +312,16 @@ uint64_t Fat32_TotalBytes(const Fat32 *fs) {
 }
 uint64_t Fat32_FreeBytes(const Fat32 *fs) {
     return fs ? (uint64_t)fs->free_clus * ClusterBytes(fs) : 0;
+}
+
+/* Optional, explicit full-FAT scan. MountVolume deliberately never calls this
+ * (it would take minutes on a large stick); it exists only for callers that
+ * need an exact free count and are willing to pay for it. */
+uint32_t Fat32_RecountFree(Fat32 *fs) {
+    if (!fs) return 0;
+    fs->free_clus = CountFreeClusters(fs);
+    fs->free_known = 1;
+    return fs->free_clus;
 }
 
 /* --- probing ------------------------------------------------------------ */
@@ -513,16 +574,33 @@ long Fat32V_ReadFile(Fat32 *fs, const char *path, void *buf, uint32_t maxlen) {
 
     uint32_t left = e.size; if (left > maxlen) left = maxlen;
     uint32_t got = 0, c = e.clus, guard = 0;
+    uint32_t cbytes = fs->spc * SECSZ;
+    uint8_t *cbuf = (cbytes > SECSZ) ? (uint8_t *)malloc(cbytes) : 0;
+
     while (c >= 2u && !IsEnd(fs, c) && got < left && guard++ < 65536u) {
         uint32_t lba = ClusterToLba(fs, c);
-        for (uint32_t s = 0; s < fs->spc && got < left; ++s) {
-            if (!ReadSec(fs, lba + s, fs->sec)) return -1;
-            uint32_t chunk = left - got; if (chunk > SECSZ) chunk = SECSZ;
-            memcpy((uint8_t *)buf + got, fs->sec, chunk);
-            got += chunk;
+        if (cbuf) {
+            /* One USB transfer per cluster instead of one per 512-byte sector.
+             * libXenon's mass-storage driver happily reads whole clusters (it
+             * splits internally at 32 KB), so this is a large real speedup for
+             * asset loads without changing on-disk semantics. */
+            uint32_t want = left - got;
+            if (want > cbytes) want = cbytes;
+            uint32_t nsec = (want + SECSZ - 1u) / SECSZ;
+            if (!fs->rd(fs->ctx, lba, nsec, cbuf)) { free(cbuf); return -1; }
+            memcpy((uint8_t *)buf + got, cbuf, want);
+            got += want;
+        } else {
+            for (uint32_t s = 0; s < fs->spc && got < left; ++s) {
+                if (!ReadSec(fs, lba + s, fs->sec)) return -1;
+                uint32_t chunk = left - got; if (chunk > SECSZ) chunk = SECSZ;
+                memcpy((uint8_t *)buf + got, fs->sec, chunk);
+                got += chunk;
+            }
         }
         c = FatNext(fs, c);
     }
+    free(cbuf);
     /* A short read means the cluster chain ended before the declared size: the
      * file is truncated/corrupt. Signal it instead of returning a partial
      * buffer that callers would treat as complete. */
@@ -558,7 +636,9 @@ int Fat32V_Exists(Fat32 *fs, const char *path) {
 
 static uint32_t AllocCluster(Fat32 *fs) {
     if (!fs->writable || fs->clus_cnt == 0) return 0;
-    if (fs->free_clus == 0) return 0;
+    /* Do not trust free_clus==0 as "full": the FSInfo hint can be stale (some
+     * tools never update it), and refusing to write would be worse than the
+     * one-off full scan that happens when the volume really is full. */
     uint32_t total = fs->clus_cnt;
     uint32_t c = fs->next_free;
     if (c < 2u || c >= 2u + total) c = 2u;
@@ -596,15 +676,15 @@ static int ZeroCluster(Fat32 *fs, uint32_t clus) {
 /* Keeps the FSInfo sector's free-cluster / next-free hints in step with our
  * allocation bookkeeping so fsck and Windows don't see a stale summary. Only
  * touches the sector when its signatures are intact. */
-#define FSINFO_LEAD  0x41615252u
-#define FSINFO_STRUC 0x61417272u
 static void WriteFsInfo(Fat32 *fs) {
     if (!fs->writable || fs->fsinfo_sec == 0) return;
     if (fs->clus_cnt && fs->free_clus > fs->clus_cnt) return;
     if (!ReadSec(fs, fs->fsinfo_sec, fs->sec)) return;
     if (Rd32(fs->sec) != FSINFO_LEAD || Rd32(fs->sec + 484) != FSINFO_STRUC)
         return;
-    Wr32(fs->sec + 488, fs->free_clus);
+    /* Only publish the free count if we actually know it; otherwise mark it
+     * unknown (0xFFFFFFFF) rather than writing a guess. */
+    Wr32(fs->sec + 488, fs->free_known ? fs->free_clus : 0xFFFFFFFFu);
     Wr32(fs->sec + 492, fs->next_free);
     WriteSec(fs, fs->fsinfo_sec, fs->sec);
 }
