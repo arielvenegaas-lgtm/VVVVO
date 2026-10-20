@@ -154,27 +154,28 @@ int main()
     if (game.usingmmmmmm == 1) music.usingmmmmmm = true;
     if (game.slowdown == 0) game.slowdown = 30;
 
-	//Divided by 5 because the xbox only runs the game at like 20 fps.
-	//Speeding up the game feels more natural.
+	// VVVVVV's simulation is frame-based at 30 Hz. Keep the original frame
+	// targets (34/41/55/83 ms = 30/24/18/12 FPS): the renderer is fast enough
+	// now that artificially speeding the game up is neither needed nor right.
     switch (game.slowdown){
         case 30:
-            game.gameframerate = 34/5;
+            game.gameframerate = 34;
             break;
 
         case 24:
-            game.gameframerate = 41/5;
+            game.gameframerate = 41;
             break;
 
         case 18:
-            game.gameframerate = 55/5;
+            game.gameframerate = 55;
             break;
 
         case 12:
-            game.gameframerate = 83/5;
+            game.gameframerate = 83;
             break;
         
         default:
-            game.gameframerate = 34/5;
+            game.gameframerate = 34;
             break;
     }
 

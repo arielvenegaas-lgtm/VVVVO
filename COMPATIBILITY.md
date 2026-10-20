@@ -20,7 +20,8 @@ dependency with a libXenon one.
 | Game logic | Compiles from XVVVVX sources (`src/`) |
 | Video | Implemented: CPU 320×240 ARGB → Xenos scan-out (integer scale, centred) |
 | Input | Wired to libXenon USB pad reports (SDL event synthesis) |
-| Filesystem | Implemented: FAT32 on USB mass storage (`fat32.c`) |
+| Filesystem | Implemented: FAT32 on USB mass storage; `fopen`/`remove` routed through it |
+| Frame rate | Authentic 30 Hz simulation (34/41/55/83 ms), renderer optimised |
 | Audio | **Silent stub** — no sound/music in this milestone |
 | CI | Dockerized libXenon build workflow |
 
@@ -50,6 +51,8 @@ Everything that is pure game logic runs unmodified:
 | `d3d8`/`d3dx8`/shaders (D3D9 path in dxs360) | Xenos scan-out framebuffer | `xenon/source/gfx.cpp`, `game_gfx.cpp` |
 | `DirectMusic8` (`dmusici.h`) | **silent stub** | `src/SoundSystem.cpp` |
 | Win32 `FindFirstFile`/`CreateDirectory`/`CreateFile` | `fat32.c` FAT32 driver | `src/filesystem.h`, `xenon/source/platform_fs.cpp` |
+| libc `fopen`/`fread`/`fwrite`/`fseek` (lodepng, TinyXML, `ifstream`) | link-time `--wrap=fopen` → `funopen()` over FAT32 | `xenon/source/platform_file.cpp` |
+| libc `remove` (save deletion) | link-time `--wrap=remove` → `Fat32V_Unlink` | `xenon/source/platform_file.cpp` |
 | `D:\data`, `D:\user` hardcoded paths | mapped to `/data`, `/user` on mounted volume | `MapPath()` in `src/filesystem.h` |
 | SDL2 window/renderer/texture | SDL2-compatible shim → Xenos | `xenon/source/sdlstub.cpp`, `SDL.h` |
 | `XLaunchNewImage` (dashboard) | `xenon_smc_power_reboot` | `xenon/source/platform_misc.cpp` |
@@ -95,7 +98,10 @@ SDL2x build. The libXenon input backend must synthesise those exact numbers
 libXenon ships no FAT/FAT32 driver, so `xenon/source/fat32.c` (from dxs360) is
 used. `platform_fs.cpp` mounts the first USB mass-storage LUN through
 `USBStorage_Read_Sectors_0`/`Write_Sectors_0`. The game's `D:\...` paths are
-translated by `MapPath()`.
+translated by `MapPath()`. All libc file access (used by lodepng, TinyXML and
+`std::ifstream`) is routed through the same volume at link time via
+`--wrap=fopen`, and `remove()` via `--wrap=remove`, so PNG loading, save files
+and custom-level loading/saving all reach the USB stick.
 
 Expected layout on the USB stick:
 

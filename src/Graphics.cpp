@@ -3146,7 +3146,10 @@ void Graphics::drawtele(int x, int y, int t, int c)
 
 Uint32 Graphics::getRGB(Uint8 r, Uint8 g, Uint8 b)
 {
-	return SDL_MapRGB(backBuffer->format, b, g, r);
+	// The XVVVVX Xbox Original build swapped R/B here to suit its D3D
+	// backbuffer. This port's present path maps the word as 0x00RRGGBB, so
+	// use the logical RGB order (same as getBGR/RGBf/RGBflip).
+	return SDL_MapRGB(backBuffer->format, r, g, b);
 }
 
 Uint32 Graphics::getBGR(Uint8 r, Uint8 g, Uint8 b)

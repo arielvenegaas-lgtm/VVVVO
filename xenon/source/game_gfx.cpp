@@ -35,14 +35,19 @@ void VvvvoGfx_Text(int x, int y, int scale, uint32_t argb, const char *text) {
     if (g_gfx) Gfx_DrawText(g_gfx, x, y, scale, argb, text);
 }
 
+/* One converted source row, reused for every duplicated scanline. VVVVVV's
+ * screen is 320 px wide; the limit just keeps a stray huge surface safe. */
+static uint32_t s_line[2048];
+
 void VvvvoGfx_Present(const uint32_t *pixels, int w, int h, int pitch) {
     if (!g_gfx || !pixels || w <= 0 || h <= 0) return;
+    if (w > (int)(sizeof(s_line)/sizeof(s_line[0]))) return;
 
     int dw = VvvvoGfx_Width();
     int dh = VvvvoGfx_Height();
     if (dw <= 0 || dh <= 0) return;
 
-    // Integer scale that fits, centred (letterboxed) on the scan-out.
+    /* Integer scale that fits, centred (letterboxed) on the scan-out. */
     int scale = dw / w;
     int sy = dh / h;
     if (sy < scale) scale = sy;
@@ -56,29 +61,30 @@ void VvvvoGfx_Present(const uint32_t *pixels, int w, int h, int pitch) {
     uint32_t *dst = Gfx_Lock(g_gfx, 0);
     if (!dst) return;
 
-    // Clear the visible frame region once, then write our scaled image.
-    Gfx_FillRect(g_gfx, ox, oy, outw, outh, 0xFF000000u);
-
+    /* The game's screen surface is native ARGB8888 (masks R=0x00FF0000,
+     * G=0x0000FF00, B=0x000000FF, A=0xFF000000), i.e. exactly the 0xAARRGGBB
+     * layout the shadow framebuffer wants. Only force the alpha byte opaque.
+     * No per-pixel channel shuffling and no divisions: convert each source row
+     * once, then replicate it `scale` times horizontally and vertically. */
     const uint8_t *src = (const uint8_t *)pixels;
-    for (int yy = 0; yy < outh; ++yy) {
-        int srcy = yy / scale;
-        const uint32_t *srow = (const uint32_t *)(src + (size_t)srcy * pitch);
-        int dy = oy + yy;
-        if (dy < 0 || dy >= dh) continue;
-        uint32_t *drow = dst + (size_t)dy * dw;
-        for (int xx = 0; xx < outw; ++xx) {
-            int srcx = xx / scale;
-            int dx = ox + xx;
-            if (dx < 0 || dx >= dw) continue;
-            // Source (big-endian surface) word: R<<24 | G<<16 | B<<8 | A<<0.
-            // Gfx shadow expects 0xAARRGGBB.
-            uint32_t c = srow[srcx];
-            uint32_t r = (c >> 24) & 0xFFu;
-            uint32_t g = (c >> 16) & 0xFFu;
-            uint32_t b = (c >> 8)  & 0xFFu;
-            uint32_t a = c & 0xFFu;
-            if (a == 0u) { drow[dx] = 0xFF000000u; continue; }
-            drow[dx] = 0xFF000000u | (r << 16) | (g << 8) | b;
+
+    for (int yy = 0; yy < h; ++yy) {
+        const uint32_t *srow = (const uint32_t *)(src + (size_t)yy * (size_t)pitch);
+        for (int xx = 0; xx < w; ++xx) {
+            uint32_t c = srow[xx];
+            s_line[xx] = ((c >> 24) == 0u) ? 0xFF000000u : (c | 0xFF000000u);
+        }
+
+        int dy0 = oy + yy * scale;
+        for (int rep = 0; rep < scale; ++rep) {
+            int dy = dy0 + rep;
+            if (dy >= dh) break;
+            uint32_t *drow = dst + (size_t)dy * (size_t)dw + ox;
+            for (int xx = 0; xx < w; ++xx) {
+                uint32_t v = s_line[xx];
+                int k = scale;
+                do { *drow++ = v; } while (--k);
+            }
         }
     }
 

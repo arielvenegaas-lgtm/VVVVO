@@ -57,6 +57,9 @@ SDL_Surface *SDL_CreateRGBSurface(Uint32 flags, int width, int height, int depth
   memset(s->pixels,0,(size_t)width*height*4);
   s->flags = SDL_SWSURFACE;
   s->locked=0; s->refcount=1;
+  s->userdata = 0; s->lock_data = 0; s->map = 0;
+  s->blendMode = Amask ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE;
+  s->alphaMod = 255;
   return s;
 }
 
@@ -87,7 +90,7 @@ int SDL_SetWindowFullscreen(SDL_Window *window, Uint32 flags) {(void)window;(voi
 void SDL_RenderSetLogicalSize(SDL_Renderer *r,int w,int h){(void)r;(void)w;(void)h;}
 void SDL_RenderSetIntegerScale(SDL_Renderer *r, SDL_bool b){(void)r;(void)b;}
 void SDL_ShowWindow(SDL_Window *w){(void)w;}
-int SDL_SetSurfaceBlendMode(SDL_Surface *s, SDL_BlendMode m){(void)s;(void)m; return 0;}
+int SDL_SetSurfaceBlendMode(SDL_Surface *s, SDL_BlendMode m){if(s) s->blendMode=(Uint8)m; return 0;}
 int SDL_FillRect(SDL_Surface *dst, const SDL_Rect *rect, Uint32 color) {
   if(!dst||!dst->pixels) return -1;
   int x0=0,y0=0,x1=dst->w,y1=dst->h;
@@ -99,22 +102,73 @@ int SDL_FillRect(SDL_Surface *dst, const SDL_Rect *rect, Uint32 color) {
   }
   return 0;
 }
+/* x / 255 for x <= 65535 without a divide. */
+static inline Uint32 Div255(Uint32 x) { return (x + (x >> 8)) >> 8; }
+
+/* SDL2 uses the *source* surface's blend mode and converts pixel formats
+ * during the blit. The game relies on both: images are RGBA8888 (R in the high
+ * byte) while the screen/back/fore/tower buffers are ARGB8888, so a raw word
+ * copy would swap channels and paint transparent sprite pixels black. */
 int SDL_BlitSurface(SDL_Surface *src,const SDL_Rect *srcrect,SDL_Surface *dst,const SDL_Rect *dstrect) {
-  if(!src||!dst||!src->pixels||!dst->pixels) return -1;
+  if(!src||!dst||!src->pixels||!dst->pixels||!src->format||!dst->format) return -1;
   int sx=0,sy=0,sw=src->w,sh=src->h;
   if(srcrect){ sx=srcrect->x; sy=srcrect->y; sw=srcrect->w; sh=srcrect->h; }
-  int dx=0,dy=0,dw=dst->w,dh=dst->h;
-  if(dstrect){ dx=dstrect->x; dy=dstrect->y; dw=dstrect->w; dh=dstrect->h; }
+  int dx=0,dy=0;
+  if(dstrect){ dx=dstrect->x; dy=dstrect->y; }
   if(sx<0){ sw+=sx; sx=0;} if(sy<0){ sh+=sy; sy=0;}
-  if(dx<0){ dw+=dx; dx=0;} if(dy<0){ dh+=dy; dy=0;}
+  if(dx<0){ sw+=dx; sx-=dx; dx=0;} if(dy<0){ sh+=dy; sy-=dy; dy=0;}
   if(sx+sw>src->w) sw=src->w-sx; if(sy+sh>src->h) sh=src->h-sy;
-  if(dx+dw>dst->w) dw=dst->w-dx; if(dy+dh>dst->h) dh=dst->h-dy;
-  int bw = sw < dw ? sw : dw;
-  int bh = sh < dh ? sh : dh;
-  for(int y=0;y<bh;y++){
-    Uint32 *srow=(Uint32*)((char*)src->pixels + (sy+y)*src->pitch);
-    Uint32 *drow=(Uint32*)((char*)dst->pixels + (dy+y)*dst->pitch);
-    for(int x=0;x<bw;x++) drow[dx+x]=srow[sx+x];
+  if(dx+sw>dst->w) sw=dst->w-dx; if(dy+sh>dst->h) sh=dst->h-dy;
+  if(sw<=0||sh<=0) return 0;
+
+  const SDL_PixelFormat *sf=src->format, *df=dst->format;
+  int same = (sf->Rshift==df->Rshift && sf->Gshift==df->Gshift &&
+              sf->Bshift==df->Bshift && sf->Ashift==df->Ashift &&
+              sf->Amask==df->Amask);
+  int blend = (src->blendMode==SDL_BLENDMODE_BLEND) && sf->Amask && src->alphaMod;
+
+  for(int y=0;y<sh;y++){
+    Uint32 *srow=(Uint32*)((char*)src->pixels + (size_t)(sy+y)*src->pitch) + sx;
+    Uint32 *drow=(Uint32*)((char*)dst->pixels + (size_t)(dy+y)*dst->pitch) + dx;
+
+    if(same && !blend){                 /* hot path: raw copy */
+      memcpy(drow, srow, (size_t)sw*4u);
+      continue;
+    }
+
+    for(int x=0;x<sw;x++){
+      Uint32 c=srow[x];
+      Uint32 A = sf->Amask ? ((c & sf->Amask) >> sf->Ashift) : 255u;
+
+      if(blend){
+        A = Div255(A * src->alphaMod);
+        if(A==0) continue;
+        if(A==255){ drow[x] = same ? c
+                    : ((((c & sf->Rmask)>>sf->Rshift) << df->Rshift) |
+                       (((c & sf->Gmask)>>sf->Gshift) << df->Gshift) |
+                       (((c & sf->Bmask)>>sf->Bshift) << df->Bshift) |
+                       (255u << df->Ashift));
+                    continue; }
+        Uint32 d=drow[x];
+        Uint32 dr=df->Amask?((d & df->Rmask)>>df->Rshift):(d>>df->Rshift);
+        Uint32 dg=df->Amask?((d & df->Gmask)>>df->Gshift):(d>>df->Gshift);
+        Uint32 db=df->Amask?((d & df->Bmask)>>df->Bshift):(d>>df->Bshift);
+        Uint32 sr=(c & sf->Rmask)>>sf->Rshift;
+        Uint32 sg=(c & sf->Gmask)>>sf->Gshift;
+        Uint32 sb=(c & sf->Bmask)>>sf->Bshift;
+        Uint32 ia=255u-A;
+        Uint32 r=Div255(sr*A + dr*ia);
+        Uint32 gg=Div255(sg*A + dg*ia);
+        Uint32 b=Div255(sb*A + db*ia);
+        drow[x] = (r<<df->Rshift)|(gg<<df->Gshift)|(b<<df->Bshift)|(255u<<df->Ashift);
+      } else {
+        drow[x] = same ? c
+          : ((((c & sf->Rmask)>>sf->Rshift) << df->Rshift) |
+             (((c & sf->Gmask)>>sf->Gshift) << df->Gshift) |
+             (((c & sf->Bmask)>>sf->Bshift) << df->Bshift) |
+             (A << df->Ashift));
+      }
+    }
   }
   return 0;
 }
@@ -236,7 +290,7 @@ int SDL_LowerBlit(SDL_Surface *src,const SDL_Rect *srcrect,SDL_Surface *dst,cons
 }
 int SDL_SetColorKey(SDL_Surface *surface, int flag, Uint32 key){(void)surface;(void)flag;(void)key; return 0;}
 int SDL_SetSurfaceColorMod(SDL_Surface *surface, Uint8 r,Uint8 g,Uint8 b){(void)surface;(void)r;(void)g;(void)b; return 0;}
-int SDL_SetSurfaceAlphaMod(SDL_Surface *surface, Uint8 a){(void)surface;(void)a; return 0;}
+int SDL_SetSurfaceAlphaMod(SDL_Surface *surface, Uint8 a){if(surface) surface->alphaMod=a; return 0;}
 SDL_Surface *SDL_ConvertSurface(SDL_Surface *src, const SDL_PixelFormat *fmt, Uint32 flags){(void)fmt;(void)flags; return src;}
 SDL_Surface *SDL_DisplayFormatAlpha(SDL_Surface *surface){return surface;}
 SDL_Joystick *SDL_GameControllerGetJoystick(SDL_GameController *gamecontroller){(void)gamecontroller; return &dummy_joy;}

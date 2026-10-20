@@ -11,8 +11,8 @@
  *   - a solid red bar at the very bottom (Y) that must be present but must NOT
  *     cover the bars (guards against a wrong pitch/height).
  *
- * It uses ONLY the repository's Gfx_* API (src/gfx.h); no invented calls.
- * Build: see display_test/Makefile (free60/libxenon toolchain).
+ * It uses ONLY the repository's Gfx_* API (xenon/source/gfx.h); no invented
+ * calls. Build: see display_test/Makefile (free60/libxenon toolchain).
  */
 #include <stdint.h>
 #include <string.h>
@@ -49,12 +49,21 @@ int main(int argc, char **argv) {
 
     float t0 = NowSeconds();
     float prev = t0;
+    float fpsT = t0;
+    int   frames = 0, fps = 0;
 
     for (;;) {
         float now = NowSeconds();
         float dt = now - prev;
         prev = now;
         if (dt < 0.0f) dt = 0.0f;
+
+        ++frames;
+        if (now - fpsT >= 1.0f) {
+            fps = (int)((float)frames / (now - fpsT));
+            frames = 0;
+            fpsT = now;
+        }
 
         int W = (int)Gfx_Width(gfx);
         int H = (int)Gfx_Height(gfx);
@@ -81,7 +90,10 @@ int main(int argc, char **argv) {
         const char *pre = "display_test ";
         while (*pre) b[n++] = *pre++;
         AppendInt(b, &n, (int)(now - t0));
-        b[n++] = 's'; b[n] = 0;
+        b[n++] = 's'; b[n++] = ' '; b[n++] = 'f'; b[n++] = 'p'; b[n++] = 's';
+        b[n++] = ' ';
+        AppendInt(b, &n, fps);
+        b[n] = 0;
         Gfx_DrawText(gfx, 8, 6, 2, 0xFFFFFFFFu, b);
 
         /* Solid red strip along the bottom that must NOT cover the bars. */

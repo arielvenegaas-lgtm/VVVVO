@@ -64,6 +64,8 @@ typedef struct SDL_Surface {
   SDL_Rect clip_rect;
   struct SDL_Surface *map;
   int refcount;
+  Uint8 blendMode;
+  Uint8 alphaMod;
 } SDL_Surface;
 
 typedef enum {

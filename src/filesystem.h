@@ -23,6 +23,13 @@ extern "C" {
 int xenon_mount_fat32(void);
 }
 
+// Directory enumeration: Fat32V_ListDir reports names relative to `dir`, so a
+// no-arg callback returns the current full path as a POSIX string.
+struct FsEnumCtx {
+	std::string dir;          // mapped, no trailing slash
+	std::vector<std::string> out; // full POSIX paths ("/user/levels/x.vvv")
+};
+
 // The mounted default volume (NULL until xenon_mount_fat32() runs).
 Fat32 *FsVolume(void);
 
@@ -47,8 +54,7 @@ class fs
 
 		static int deletedir(const char* name)
 		{
-			// Not needed by the game's core loop; report failure.
-			return 0;
+			return Fat32V_Unlink(FsVolume(), MapPath(name));
 		}
 
 		static void makefile(const char* name, const char* contents = "")
@@ -111,9 +117,29 @@ class fs
 		static std::vector<std::string> enumdir(std::string dir)
 		{
 			std::vector<std::string> list;
-			// Level enumeration lives on the mounted volume; not yet wired for
-			// the first hardware milestone.
-			(void)dir;
-			return list;
+			// The game passes a Win32 wildcard ("D:\\user\\levels\\*").
+			std::string d = dir;
+			size_t star = d.find('*');
+			if (star != std::string::npos) d = d.substr(0, star);
+			const char *mapped = MapPath(d.c_str());
+
+			FsEnumCtx ctx;
+			ctx.dir = mapped;
+			while (ctx.dir.size() > 1 && ctx.dir[ctx.dir.size()-1] == '/')
+				ctx.dir.erase(ctx.dir.size()-1);
+
+			Fat32V_ListDir(FsVolume(), mapped, enumdir_cb, &ctx);
+			return ctx.out;
+		}
+
+	private:
+		static int enumdir_cb(void *cookie, const char *name, uint32_t size, int is_dir)
+		{
+			FsEnumCtx *ctx = (FsEnumCtx *)cookie;
+			(void)size;
+			if (!ctx || !name || !name[0] || is_dir) return 1; // files only
+			if (name[0] == '.') return 1;                      // skip . / ..
+			ctx->out.push_back(ctx->dir + "/" + std::string(name));
+			return 1;
 		}
 };

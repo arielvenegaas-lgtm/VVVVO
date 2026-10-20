@@ -52,7 +52,8 @@ src/            XVVVVX game sources (ported platform files live here too)
 lodepng/        PNG decoder (zlib license)
 tinyxml/        XML parser (zlib license)
 xenon/          libXenon platform layer + SDL2 shim + build
-  source/       gfx (Xenos), input (USB pad), fat32, sdlstub, game_gfx
+  source/       gfx (Xenos), input (USB pad), fat32, sdlstub, game_gfx,
+                platform_file (fopen/remove over FAT32)
   include/      (generated headers)
 display_test/   standalone Xenos colour-bar diagnostic
 reference/      original XVVVVX files, kept for diffing the port
@@ -65,10 +66,10 @@ Xbox 360 controller (via libXenon USB):
 | Action | Button |
 |--------|--------|
 | Move | Left stick / D-pad |
-| Flip gravity | A |
-| Map | Y |
-| Pause / menu | Start |
+| Accept / flip gravity | A |
 | Back / cancel | B |
+| Map / inventory | Y |
+| Pause / menu | Start |
 
 ## License
 

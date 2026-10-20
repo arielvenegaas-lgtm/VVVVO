@@ -59,13 +59,18 @@ char *FILESYSTEM_getUserLevelDirectory()
 
 void FILESYSTEM_loadFileToMemory(const char* name, char** mem, size_t* len)
 {
-	int length = (int)fs::size(name);
-	*mem = (char*) malloc(length);
-	if (length > 0)
+	long length = (long)fs::size(name);
+	// Allocate one extra byte so callers that treat the result as a text
+	// buffer (TinyXML, level parsing) always see a terminating NUL.
+	*mem = (char*) malloc(length + 1);
+	if (length > 0 && *mem)
 	{
-		Fat32V_ReadFile(FsVolume(), MapPath(name), *mem, length);
+		long got = Fat32V_ReadFile(FsVolume(), MapPath(name), *mem, (uint32_t)length);
+		if (got < 0) got = 0;
+		length = got;
 	}
-	if (len) *len = length;
+	if (*mem) (*mem)[length] = '\0';
+	if (len) *len = (size_t)length;
 }
 
 void FILESYSTEM_freeMemory(char **mem)

@@ -319,13 +319,21 @@ void BlitSurfaceColoured(
         fmt.Amask
     );
 
+    // ct.colour is in the destination (screen) pixel format; re-pack its RGB
+    // into the source surface's format. Using masks keeps this correct on the
+    // big-endian Xbox 360 (the old `& 0x00FFFFFF` assumed little-endian).
+    const SDL_PixelFormat& dfmt = *(_dest->format);
+    Uint32 cr = (ct.colour & dfmt.Rmask) >> dfmt.Rshift;
+    Uint32 cg = (ct.colour & dfmt.Gmask) >> dfmt.Gshift;
+    Uint32 cb = (ct.colour & dfmt.Bmask) >> dfmt.Bshift;
+    Uint32 result = (cr << fmt.Rshift) | (cg << fmt.Gshift) | (cb << fmt.Bshift);
+
     for(int x = 0; x < tempsurface->w; x++)
     {
         for(int y = 0; y < tempsurface->h; y++)
         {
             Uint32 pixel = ReadPixel(_src, x, y);
             Uint32 Alpha = pixel & fmt.Amask;
-            Uint32 result = ct.colour & 0x00FFFFFF;
             DrawPixel(tempsurface, x, y, result | Alpha);
         }
     }
