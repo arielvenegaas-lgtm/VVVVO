@@ -21,12 +21,17 @@ int Wav_LoadMem(const void *data, uint32_t len, WavData *out) {
     uint32_t rate = 0;
     const uint8_t *pcm = 0;
     uint32_t pcm_len = 0;
+    int truncated = 0;
 
     while (pos + 8 <= len) {
         const uint8_t *ch = p + pos;
-        uint32_t csize = rd32(ch + 4);
+        uint32_t declared = rd32(ch + 4);
+        uint32_t csize = declared;
         const uint8_t *body = ch + 8;
-        if (pos + 8 + csize > len) csize = len - (pos + 8);
+        if (pos + 8 + csize > len || pos + 8 + csize < pos) {  /* clamp + overflow */
+            csize = len - (pos + 8);
+            if (memcmp(ch, "data", 4) == 0) truncated = 1;
+        }
 
         if (memcmp(ch, "fmt ", 4) == 0 && csize >= 16) {
             fmt      = rd16(body + 0);
@@ -49,16 +54,19 @@ int Wav_LoadMem(const void *data, uint32_t len, WavData *out) {
     uint32_t bytes_per_frame = (uint32_t)channels * (bits / 8u);
     uint32_t frames = pcm_len / bytes_per_frame;
     if (frames == 0) return 0;
+    /* Drop any trailing partial frame so reads never straddle the buffer end. */
+    uint32_t use = frames * bytes_per_frame;
 
-    void *copy = malloc(pcm_len);
+    void *copy = malloc(use);
     if (!copy) return 0;
-    memcpy(copy, pcm, pcm_len);
+    memcpy(copy, pcm, use);
 
-    out->samples  = copy;
-    out->frames   = frames;
-    out->rate     = rate;
-    out->channels = channels;
-    out->bits     = bits;
+    out->samples   = copy;
+    out->frames    = frames;
+    out->rate      = rate;
+    out->channels  = channels;
+    out->bits      = bits;
+    out->truncated = (uint16_t)truncated;
     return 1;
 }
 

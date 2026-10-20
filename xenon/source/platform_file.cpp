@@ -34,10 +34,16 @@ struct MemFile {
     char          *path;   /* mapped FAT32 path, freed on close */
 };
 
+#define MEMFILE_MAX_CAP (64u * 1024u * 1024u)  /* assets/saves are small */
+
 static int MemGrow(MemFile *m, size_t need) {
     if (need <= m->cap) return 1;
+    if (need > MEMFILE_MAX_CAP) return 0;      /* refuse absurd sizes */
     size_t cap = m->cap ? m->cap : 4096;
-    while (cap < need) cap *= 2;
+    while (cap < need) {
+        if (cap > MEMFILE_MAX_CAP / 2) { cap = need; break; }
+        cap *= 2;
+    }
     unsigned char *p = (unsigned char *)realloc(m->data, cap);
     if (!p) return 0;
     m->data = p;
@@ -48,6 +54,7 @@ static int MemGrow(MemFile *m, size_t need) {
 static int MemRead(void *cookie, char *buf, _READ_WRITE_BUFSIZE_TYPE n) {
     MemFile *m = (MemFile *)cookie;
     if (!m || m->writing || n <= 0) return 0;
+    if (m->pos >= m->len) return 0;            /* guard: avoid len-pos underflow */
     size_t left = m->len - m->pos;
     size_t take = ((size_t)n < left) ? (size_t)n : left;
     if (take) {
@@ -132,7 +139,11 @@ extern "C" FILE *__wrap_fopen(const char *path, const char *mode) {
         if (size) {
             if (!MemGrow(m, size)) { free(m->path); free(m); errno = ENOMEM; return NULL; }
             long got = Fat32V_ReadFile(fs, mapped, m->data, size);
-            if (got < 0) { free(m->data); free(m->path); free(m); errno = EIO; return NULL; }
+            if (got < 0 || (uint32_t)got != size) {
+                /* A short read means a truncated/corrupt chain; refuse rather
+                 * than hand a truncated stream to lodepng/TinyXML. */
+                free(m->data); free(m->path); free(m); errno = EIO; return NULL;
+            }
             m->len = (size_t)got;
         }
         if (append) m->pos = m->len;
@@ -168,10 +179,11 @@ extern "C" long FsReadWhole(const char *mapped_path, void **out_buf) {
     uint32_t size = 0;
     int isdir = 0;
     if (!Fat32V_Stat(fs, mapped_path, &size, &isdir) || isdir || size == 0) return -1;
+    if (size > MEMFILE_MAX_CAP) return -1;
     void *buf = malloc(size);
     if (!buf) return -1;
     long got = Fat32V_ReadFile(fs, mapped_path, buf, size);
-    if (got < 0) { free(buf); return -1; }
+    if (got < 0 || (uint32_t)got != size) { free(buf); return -1; }
     *out_buf = buf;
     return got;
 }

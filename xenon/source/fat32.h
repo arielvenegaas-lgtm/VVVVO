@@ -92,6 +92,11 @@ int  Fat32V_Mkdir(Fat32 *fs, const char *path);
 /* Deletes a regular file and frees its clusters. Returns 1 on success. */
 int  Fat32V_Unlink(Fat32 *fs, const char *path);
 
+/* Renames `from` to `to` within the same directory, moving the file's cluster
+ * chain by reference (no data copy). If `to` exists it is unlinked first.
+ * Returns 1 on success. Used to atomically publish a rewritten save file. */
+int  Fat32V_Rename(Fat32 *fs, const char *from, const char *to);
+
 /* Writes a whole in-memory buffer to `path` (create/truncate). Intended for
  * small files; games are copied with the streaming writer below. */
 int  Fat32V_WriteFile(Fat32 *fs, const char *path, const void *data, uint32_t len);

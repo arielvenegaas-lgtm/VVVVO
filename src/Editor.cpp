@@ -1700,7 +1700,11 @@ void EditorClass::load(std::string& _path)
     {
         pElem=hDoc.FirstChildElement().Element();
         // should always have a valid root but handle gracefully if it does
-        if (!pElem) fs::slog("No valid root! Corrupt level file?\n");
+        if (!pElem)
+        {
+            fs::slog("No valid root! Corrupt level file?\n");
+            return;
+        }
 
         pElem->QueryIntAttribute("version", &version);
         // save this for later
@@ -1734,6 +1738,14 @@ void EditorClass::load(std::string& _path)
         if (pKey == "mapheight") mapheight = atoi(pText);
         if (pKey == "levmusic") levmusic = atoi(pText);
 
+        // A corrupt/hostile level could declare absurd dimensions. Clamp them
+        // to the array capacities (contents[] is sized for exactly maxwidth x
+        // maxheight) so the parse loops below can never write out of bounds.
+        if (mapwidth < 1) mapwidth = 1;
+        if (mapheight < 1) mapheight = 1;
+        if (mapwidth > maxwidth) mapwidth = maxwidth;
+        if (mapheight > maxheight) mapheight = maxheight;
+
 
         if (pKey == "contents")
         {
@@ -1750,7 +1762,9 @@ void EditorClass::load(std::string& _path)
                 int y =0;
                 for(size_t i = 0; i < values.size(); i++)
                 {
-                    contents[x + (maxwidth*40*y)] = atoi(values[i].c_str());
+                    size_t idx = (size_t)x + ((size_t)maxwidth*40u*(size_t)y);
+                    if (idx >= contents.size()) break;  // stop at the array end
+                    contents[idx] = atoi(values[i].c_str());
                     x++;
                     if(x == mapwidth*40)
                     {
@@ -1783,8 +1797,10 @@ void EditorClass::load(std::string& _path)
         if (pKey == "edEntities")
         {
             int i = 0;
+            const int edCap = (int)(sizeof(edentity)/sizeof(edentity[0]));
             for( TiXmlElement* edEntityEl = pElem->FirstChildElement(); edEntityEl; edEntityEl=edEntityEl->NextSiblingElement())
             {
+                if (i >= edCap) break;   // ignore extra entities rather than overflow
                 std::string pKey(edEntityEl->Value());
                 //const char* pText = edEntityEl->GetText() ;
                 if(edEntityEl->GetText() != NULL) edentity[i].scriptname = std::string(edEntityEl->GetText());
@@ -1809,8 +1825,10 @@ void EditorClass::load(std::string& _path)
         if (pKey == "levelMetaData")
         {
             int i = 0;
+            const int lvlCap = (int)(sizeof(level)/sizeof(level[0]));
             for( TiXmlElement* edLevelClassElement = pElem->FirstChildElement(); edLevelClassElement; edLevelClassElement=edLevelClassElement->NextSiblingElement())
             {
+                if (i >= lvlCap) break;  // ignore extra rooms rather than overflow
                 std::string pKey(edLevelClassElement->Value());
                 if(edLevelClassElement->GetText() != NULL) level[i].roomname = std::string(edLevelClassElement->GetText()) ;
                 edLevelClassElement->QueryIntAttribute("tileset", &level[i].tileset);

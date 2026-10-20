@@ -47,7 +47,9 @@ void VvvvoGfx_Present(const uint32_t *pixels, int w, int h, int pitch) {
     int dh = VvvvoGfx_Height();
     if (dw <= 0 || dh <= 0) return;
 
-    /* Integer scale that fits, centred (letterboxed) on the scan-out. */
+    /* Integer scale that fits, centred (letterboxed) on the scan-out. If the
+     * scan-out is smaller than the source, fall back to 1:1 and clip rather
+     * than producing a negative origin (which would write before the row). */
     int scale = dw / w;
     int sy = dh / h;
     if (sy < scale) scale = sy;
@@ -57,9 +59,18 @@ void VvvvoGfx_Present(const uint32_t *pixels, int w, int h, int pitch) {
     int outh = h * scale;
     int ox = (dw - outw) / 2;
     int oy = (dh - outh) / 2;
+    if (ox < 0) ox = 0;
+    if (oy < 0) oy = 0;
 
     uint32_t *dst = Gfx_Lock(g_gfx, 0);
     if (!dst) return;
+
+    /* Clip the destination span to the framebuffer so no write can go out of
+     * bounds regardless of source/scan-out sizes. */
+    if (ox >= dw || oy >= dh) { Gfx_Present(g_gfx); return; }
+    if (ox + outw > dw) outw = dw - ox;
+    if (oy + outh > dh) outh = dh - oy;
+    if (outw <= 0 || outh <= 0) { Gfx_Present(g_gfx); return; }
 
     /* The game's screen surface is native ARGB8888 (masks R=0x00FF0000,
      * G=0x0000FF00, B=0x000000FF, A=0xFF000000), i.e. exactly the 0xAARRGGBB
@@ -68,9 +79,15 @@ void VvvvoGfx_Present(const uint32_t *pixels, int w, int h, int pitch) {
      * once, then replicate it `scale` times horizontally and vertically. */
     const uint8_t *src = (const uint8_t *)pixels;
 
-    for (int yy = 0; yy < h; ++yy) {
+    /* Number of source columns/rows that fit within the clipped destination. */
+    int cols = outw / scale;
+    if (cols > w) cols = w;
+    int rows = outh / scale;
+    if (rows > h) rows = h;
+
+    for (int yy = 0; yy < rows; ++yy) {
         const uint32_t *srow = (const uint32_t *)(src + (size_t)yy * (size_t)pitch);
-        for (int xx = 0; xx < w; ++xx) {
+        for (int xx = 0; xx < cols; ++xx) {
             uint32_t c = srow[xx];
             s_line[xx] = ((c >> 24) == 0u) ? 0xFF000000u : (c | 0xFF000000u);
         }
@@ -80,7 +97,7 @@ void VvvvoGfx_Present(const uint32_t *pixels, int w, int h, int pitch) {
             int dy = dy0 + rep;
             if (dy >= dh) break;
             uint32_t *drow = dst + (size_t)dy * (size_t)dw + ox;
-            for (int xx = 0; xx < w; ++xx) {
+            for (int xx = 0; xx < cols; ++xx) {
                 uint32_t v = s_line[xx];
                 int k = scale;
                 do { *drow++ = v; } while (--k);

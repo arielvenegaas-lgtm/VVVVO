@@ -17,6 +17,8 @@ typedef struct {
     uint32_t rate;         /* sample rate in Hz                          */
     uint16_t channels;     /* 1 or 2                                     */
     uint16_t bits;         /* 8 or 16                                    */
+    uint16_t truncated;    /* 1 if the declared data size exceeded the    *
+                            * bytes actually present (damaged/truncated)  */
 } WavData;
 
 /* Loads a WAV file (already mapped/opened through the game's FILE layer or

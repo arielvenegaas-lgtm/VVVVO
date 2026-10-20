@@ -43,8 +43,7 @@ SDL_Surface *SDL_CreateRGBSurface(Uint32 flags, int width, int height, int depth
   f->format = SDL_PIXELFORMAT_ARGB8888;
   f->BitsPerPixel = 32; f->BytesPerPixel = 4;
   f->Rmask=Rmask; f->Gmask=Gmask; f->Bmask=Bmask; f->Amask=Amask;
-  f->Rshift=0; f->Gshift=8; f->Bshift=16; f->Ashift=24;
-  // Derive shifts from masks when possible.
+  // Derive shifts from the masks (the only source of truth).
   { Uint32 m; int sh;
     m=Rmask; sh=0; while(m && !(m&1)){m>>=1;sh++;} f->Rshift=sh;
     m=Gmask; sh=0; while(m && !(m&1)){m>>=1;sh++;} f->Gshift=sh;
@@ -151,9 +150,9 @@ int SDL_BlitSurface(SDL_Surface *src,const SDL_Rect *srcrect,SDL_Surface *dst,co
                        (255u << df->Ashift));
                     continue; }
         Uint32 d=drow[x];
-        Uint32 dr=df->Amask?((d & df->Rmask)>>df->Rshift):(d>>df->Rshift);
-        Uint32 dg=df->Amask?((d & df->Gmask)>>df->Gshift):(d>>df->Gshift);
-        Uint32 db=df->Amask?((d & df->Bmask)>>df->Bshift):(d>>df->Bshift);
+        Uint32 dr=df->Rmask?((d & df->Rmask)>>df->Rshift):0u;
+        Uint32 dg=df->Gmask?((d & df->Gmask)>>df->Gshift):0u;
+        Uint32 db=df->Bmask?((d & df->Bmask)>>df->Bshift):0u;
         Uint32 sr=(c & sf->Rmask)>>sf->Rshift;
         Uint32 sg=(c & sf->Gmask)>>sf->Gshift;
         Uint32 sb=(c & sf->Bmask)>>sf->Bshift;
@@ -161,13 +160,16 @@ int SDL_BlitSurface(SDL_Surface *src,const SDL_Rect *srcrect,SDL_Surface *dst,co
         Uint32 r=Div255(sr*A + dr*ia);
         Uint32 gg=Div255(sg*A + dg*ia);
         Uint32 b=Div255(sb*A + db*ia);
-        drow[x] = (r<<df->Rshift)|(gg<<df->Gshift)|(b<<df->Bshift)|(255u<<df->Ashift);
+        Uint32 out=(r<<df->Rshift)|(gg<<df->Gshift)|(b<<df->Bshift);
+        if(df->Amask) out|=(255u<<df->Ashift);
+        drow[x] = out;
       } else {
-        drow[x] = same ? c
+        Uint32 out=same ? c
           : ((((c & sf->Rmask)>>sf->Rshift) << df->Rshift) |
              (((c & sf->Gmask)>>sf->Gshift) << df->Gshift) |
-             (((c & sf->Bmask)>>sf->Bshift) << df->Bshift) |
-             (A << df->Ashift));
+             (((c & sf->Bmask)>>sf->Bshift) << df->Bshift));
+        if(!same && df->Amask) out|=(A << df->Ashift);
+        drow[x] = out;
       }
     }
   }

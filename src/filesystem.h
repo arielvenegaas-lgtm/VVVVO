@@ -77,8 +77,14 @@ class fs
 				uint32_t sz = 0;
 				Fat32V_Stat(FsVolume(), MapPath(name), &sz, NULL);
 				size_t clen = strlen(contents);
-				char *buf = (char*)malloc(sz + clen + 1);
-				if (sz) Fat32V_ReadFile(FsVolume(), MapPath(name), buf, sz);
+				if (sz > (uint32_t)(64u * 1024u * 1024u) || clen > (size_t)(64u * 1024u * 1024u))
+					return; // refuse absurd sizes rather than overflow the size math
+				char *buf = (char*)malloc((size_t)sz + clen + 1);
+				if (!buf) return; // out of memory: drop the log line, don't crash
+				if (sz) {
+					long got = Fat32V_ReadFile(FsVolume(), MapPath(name), buf, sz);
+					if (got < 0 || (uint32_t)got != sz) { free(buf); return; }
+				}
 				memcpy(buf + sz, contents, clen);
 				buf[sz + clen] = '\0';
 				Fat32V_WriteFile(FsVolume(), MapPath(name), buf, (uint32_t)(sz + clen));

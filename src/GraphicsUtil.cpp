@@ -37,19 +37,25 @@ SDL_Surface* GetSubSurface( SDL_Surface* metaSurface, int x, int y, int width, i
     area.w = width;
     area.h = height;
 
-    // Set the RGBA mask values.
+    // Inherit the meta-surface's pixel format so the blit below is a
+    // same-format copy (a hardcoded endian-dependent mask set can disagree
+    // with the source and swap channels).
     Uint32 r, g, b, a;
+    if (metaSurface && metaSurface->format)
+    {
+        r = metaSurface->format->Rmask;
+        g = metaSurface->format->Gmask;
+        b = metaSurface->format->Bmask;
+        a = metaSurface->format->Amask;
+    }
+    else
+    {
 #if SDL_BYTEORDER == SDL_BIG_ENDIAN
-    r = 0xff000000;
-    g = 0x00ff0000;
-    b = 0x0000ff00;
-    a = 0x000000ff;
+        r = 0xff000000; g = 0x00ff0000; b = 0x0000ff00; a = 0x000000ff;
 #else
-    r = 0x000000ff;
-    g = 0x0000ff00;
-    b = 0x00ff0000;
-    a = 0xff000000;
+        r = 0x000000ff; g = 0x0000ff00; b = 0x00ff0000; a = 0xff000000;
 #endif
+    }
 
     //Convert to the correct display format after nabbing the new _surface or we will slow things down.
     SDL_Surface* preSurface = SDL_CreateRGBSurface(SDL_SWSURFACE, width, height, 32, r, g, b, a);

@@ -80,6 +80,81 @@ int main(int argc, char **argv) {
         free(buf);
     }
 
+    /* RIFF/WAVE with no fmt/data must be rejected */
+    {
+        snprintf(path, sizeof path, "%s/empty.wav", argv[1]);
+        uint32_t n = 0; void *buf = read_file(path, &n);
+        WavData w;
+        int ok = buf && Wav_LoadMem(buf, n, &w);
+        CHECK(!ok, "reject WAVE with no fmt/data chunks");
+        if (ok) Wav_Free(&w);
+        free(buf);
+    }
+
+    /* 24-bit PCM must be rejected */
+    {
+        snprintf(path, sizeof path, "%s/bits24.wav", argv[1]);
+        uint32_t n = 0; void *buf = read_file(path, &n);
+        WavData w;
+        int ok = buf && Wav_LoadMem(buf, n, &w);
+        CHECK(!ok, "reject 24-bit PCM");
+        if (ok) Wav_Free(&w);
+        free(buf);
+    }
+
+    /* data-before-fmt must still decode */
+    {
+        snprintf(path, sizeof path, "%s/datafirst.wav", argv[1]);
+        uint32_t n = 0; void *buf = read_file(path, &n);
+        WavData w;
+        int ok = buf && Wav_LoadMem(buf, n, &w);
+        CHECK(ok, "accept data chunk before fmt chunk");
+        if (ok) {
+            CHECK(w.rate == 16000 && w.channels == 1 && w.bits == 16,
+                  "data-first: parsed fmt correctly");
+            Wav_Free(&w);
+        }
+        free(buf);
+    }
+
+    /* truncated data chunk: loads only the bytes present, flagged truncated */
+    {
+        snprintf(path, sizeof path, "%s/truncated.wav", argv[1]);
+        uint32_t n = 0; void *buf = read_file(path, &n);
+        WavData w;
+        int ok = buf && Wav_LoadMem(buf, n, &w);
+        CHECK(ok, "accept truncated data chunk (partial)");
+        if (ok) {
+            CHECK(w.truncated == 1, "truncated data chunk flagged");
+            CHECK(w.frames == 100, "truncated: frames limited to bytes present");
+            Wav_Free(&w);
+        }
+        free(buf);
+    }
+
+    /* unusual sample rates: 8 kHz mono and 48 kHz stereo */
+    {
+        struct { const char *name; int rate; int ch; int bits; } u[] = {
+            { "mono16_8000.wav",   8000,  1, 16 },
+            { "stereo16_48000.wav", 48000, 2, 16 },
+        };
+        for (unsigned i = 0; i < sizeof(u)/sizeof(u[0]); ++i) {
+            snprintf(path, sizeof path, "%s/%s", argv[1], u[i].name);
+            uint32_t n = 0; void *buf = read_file(path, &n);
+            WavData w;
+            char msg[128];
+            int ok = buf && Wav_LoadMem(buf, n, &w);
+            snprintf(msg, sizeof msg, "decode unusual rate %s", u[i].name);
+            CHECK(ok, msg);
+            if (ok) {
+                snprintf(msg, sizeof msg, "%s rate/ch correct", u[i].name);
+                CHECK(w.rate == (uint32_t)u[i].rate && w.channels == u[i].ch, msg);
+                Wav_Free(&w);
+            }
+            free(buf);
+        }
+    }
+
     /* resampling: 22050 -> 48000 step, sample a run and check bounded */
     {
         snprintf(path, sizeof path, "%s/mono16_22050.wav", argv[1]);
@@ -87,16 +162,32 @@ int main(int argc, char **argv) {
         WavData w;
         if (buf && Wav_LoadMem(buf, n, &w)) {
             double step = (double)w.rate / 48000.0;
-            double pos = 0.0; int bounded = 1, nonzero = 0;
+            double pos = 0.0; int nonzero = 0;
             for (int i = 0; i < 1000; i++) {
                 int16_t l, r;
                 Wav_SampleStereo(&w, pos, &l, &r);
-                (void)bounded; /* int16 by construction; keep the loop */
                 if (l != 0) nonzero = 1;
                 pos += step;
             }
-            CHECK(bounded, "resampled samples stay in int16 range");
             CHECK(nonzero, "resampled output is non-silent");
+            Wav_Free(&w);
+        }
+        free(buf);
+    }
+
+    /* mono -> stereo duplication: both channels equal for a mono source */
+    {
+        snprintf(path, sizeof path, "%s/mono16_22050.wav", argv[1]);
+        uint32_t n = 0; void *buf = read_file(path, &n);
+        WavData w;
+        if (buf && Wav_LoadMem(buf, n, &w)) {
+            int same = 1;
+            for (double pos = 0.0; pos < (double)w.frames; pos += 37.0) {
+                int16_t l, r;
+                Wav_SampleStereo(&w, pos, &l, &r);
+                if (l != r) { same = 0; break; }
+            }
+            CHECK(same, "mono source produces identical L/R");
             Wav_Free(&w);
         }
         free(buf);

@@ -523,6 +523,10 @@ long Fat32V_ReadFile(Fat32 *fs, const char *path, void *buf, uint32_t maxlen) {
         }
         c = FatNext(fs, c);
     }
+    /* A short read means the cluster chain ended before the declared size: the
+     * file is truncated/corrupt. Signal it instead of returning a partial
+     * buffer that callers would treat as complete. */
+    if (got != left) return -1;
     return (long)got;
 }
 
@@ -959,6 +963,75 @@ int Fat32V_Unlink(Fat32 *fs, const char *path) {
     return ok;
 }
 
+/* Renames `from` to `to` within the same directory, without touching the file
+ * data (cluster chain is moved by reference). Used to atomically publish a
+ * freshly written save: the caller writes to a temp name and renames it over
+ * the real name, so the previous save is only replaced once the new one is
+ * safely on disk. Returns 1 on success. */
+int Fat32V_Rename(Fat32 *fs, const char *from, const char *to) {
+    if (!fs || !fs->writable) return 0;
+    char fp[256], fn[256], tp[256], tn[256];
+    if (!SplitPath(from, fp, sizeof(fp), fn, sizeof(fn))) return 0;
+    if (!SplitPath(to, tp, sizeof(tp), tn, sizeof(tn))) return 0;
+    uint32_t fclus, tclus;
+    if (!ResolveDir(fs, fp, &fclus)) return 0;
+    if (!ResolveDir(fs, tp, &tclus)) return 0;
+    if (fclus != tclus) return 0;      /* only same-directory rename supported */
+
+    DirEnt src;
+    if (!FindEntry(fs, fclus, fn, &src) || src.is_dir) return 0;
+
+    /* If the destination exists, unlink it first (its chain is freed). */
+    DirEnt dst;
+    if (FindEntry(fs, tclus, tn, &dst)) {
+        if (dst.is_dir) return 0;
+        if (!Fat32V_Unlink(fs, to)) return 0;
+    }
+
+    DirBuf d;
+    if (!DirLoad(fs, tclus, &d)) return 0;
+    uint8_t short11[11];
+    MakeShortName(&d, tn, short11);
+    uint8_t lfn[21 * 32];
+    int lunits = BuildLfn(tn, short11, lfn, 20);
+    if (lunits < 0) { DirFree(&d); return 0; }
+    uint32_t need = (uint32_t)lunits + 1u;
+    long at = DirFindFree(&d, (int)need);
+    if (at < 0) {
+        if (!DirExtend(fs, &d)) { DirFree(&d); return 0; }
+        at = DirFindFree(&d, (int)need);
+    }
+    if (at < 0) { DirFree(&d); return 0; }
+
+    /* Fresh short-name derived against the (possibly just-updated) dir. */
+    MakeShortName(&d, tn, short11);
+    uint8_t *p = d.buf + at;
+    if (lunits > 0) { memcpy(p, lfn, (size_t)lunits * 32); p += lunits * 32; }
+    memset(p, 0, 32);
+    memcpy(p, short11, 11);
+    p[11] = 0;
+    Wr16(p + 20, (uint16_t)(src.clus >> 16));
+    Wr16(p + 26, (uint16_t)(src.clus & 0xFFFF));
+    Wr32(p + 28, src.size);
+
+    if (!DirEnsureTerminator(fs, &d, (uint32_t)at + need * 32)) { DirFree(&d); return 0; }
+    if (!DirCommit(fs, tclus, &d)) { DirFree(&d); return 0; }
+    DirFree(&d);
+
+    /* Now remove the source entry (do NOT free the chain — it moved). */
+    DirBuf sd;
+    if (DirLoad(fs, fclus, &sd)) {
+        long idx = DirFindEntry(&sd, fn);
+        if (idx >= 0) {
+            DirMarkDeleted(&sd, (uint32_t)idx);
+            DirCommit(fs, fclus, &sd);
+        }
+        DirFree(&sd);
+    }
+    WriteFsInfo(fs);
+    return 1;
+}
+
 /* --- streaming writer --------------------------------------------------- */
 struct Fat32File {
     Fat32   *fs;
@@ -995,18 +1068,23 @@ static int FileFlushSec(Fat32File *f) {
     return 1;
 }
 
-Fat32File *Fat32File_Create(Fat32 *fs, const char *path) {
+static Fat32File *Fat32File_CreateEx(Fat32 *fs, const char *path, int truncate_existing) {
     if (!fs || !fs->writable) return 0;
     char parent[256], name[256];
     if (!SplitPath(path, parent, sizeof(parent), name, sizeof(name))) return 0;
     uint32_t parent_clus;
     if (!ResolveDir(fs, parent, &parent_clus)) return 0;
 
-    /* If it already exists, remove it first (truncate semantics). */
+    /* If it already exists, remove it first (truncate semantics) unless the
+     * caller guarantees a unique name (atomic temp-file writes). */
     DirEnt ex;
     if (FindEntry(fs, parent_clus, name, &ex)) {
         if (ex.is_dir) return 0;
-        Fat32V_Unlink(fs, path);
+        if (truncate_existing) {
+            if (!Fat32V_Unlink(fs, path)) return 0;
+        } else {
+            return 0;   /* refuse to clobber when caller asked not to */
+        }
     }
 
     DirBuf d;
@@ -1042,6 +1120,10 @@ Fat32File *Fat32File_Create(Fat32 *fs, const char *path) {
     int i = 0; for (; name[i] && i < 255; ++i) f->name[i] = name[i]; f->name[i] = 0;
     f->ok = 1;
     return f;
+}
+
+Fat32File *Fat32File_Create(Fat32 *fs, const char *path) {
+    return Fat32File_CreateEx(fs, path, 1);
 }
 
 int Fat32File_Write(Fat32File *f, const void *data, uint32_t len) {
@@ -1112,11 +1194,51 @@ void Fat32File_Abort(Fat32File *f) {
     free(f);
 }
 
+/* Builds a unique sibling temp path "<dir>/.vvv_tmp_X" for atomic writes. */
+static void MakeTempPath(const char *path, char *out, int osz) {
+    char parent[256], name[256];
+    if (!SplitPath(path, parent, sizeof(parent), name, sizeof(name))) {
+        if (osz > 0) out[0] = 0;
+        return;
+    }
+    int n = 0;
+    out[n++] = '/';
+    for (int i = 0; parent[i] && n < osz - 20; ++i) out[n++] = parent[i];
+    if (n > 0 && out[n - 1] != '/') out[n++] = '/';
+    const char *p = ".vvv_tmp";
+    for (int i = 0; p[i] && n < osz - 1; ++i) out[n++] = p[i];
+    out[n] = 0;
+}
+
 int Fat32V_WriteFile(Fat32 *fs, const char *path, const void *data, uint32_t len) {
-    Fat32File *f = Fat32File_Create(fs, path);
+    if (!fs || !fs->writable) return 0;
+
+    char tmp[320];
+    MakeTempPath(path, tmp, sizeof(tmp));
+    if (!tmp[0]) return 0;
+
+    /* Clean up any stale temp from a previous interrupted write. */
+    if (Fat32V_Exists(fs, tmp)) Fat32V_Unlink(fs, tmp);
+
+    Fat32File *f = Fat32File_CreateEx(fs, tmp, 0);
     if (!f) return 0;
-    if (len && !Fat32File_Write(f, data, len)) { Fat32File_Abort(f); return 0; }
-    return Fat32File_Finish(f);
+    if (len && !Fat32File_Write(f, data, len)) {
+        Fat32File_Abort(f);
+        if (Fat32V_Exists(fs, tmp)) Fat32V_Unlink(fs, tmp);
+        return 0;
+    }
+    if (!Fat32File_Finish(f)) {
+        if (Fat32V_Exists(fs, tmp)) Fat32V_Unlink(fs, tmp);
+        return 0;
+    }
+
+    /* Publish: rename temp over the real name. The old file is only replaced
+     * once the new data is durably written and its directory entry committed. */
+    if (!Fat32V_Rename(fs, tmp, path)) {
+        if (Fat32V_Exists(fs, tmp)) Fat32V_Unlink(fs, tmp);
+        return 0;
+    }
+    return 1;
 }
 
 /* --- streaming reader --------------------------------------------------- */

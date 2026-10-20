@@ -51,6 +51,8 @@ echo "== building host tests =="
 gcc -O2 -g -Wall -Wextra -o "$binary" "$here/test_fat32_host.c" "$root/xenon/source/fat32.c"
 gcc -O2 -g -Wall -Wextra -o "$work/test_blit_host" "$here/test_blit_host.c"
 gcc -O2 -g -Wall -Wextra -o "$work/test_wav_host" "$here/test_wav_host.c" "$root/xenon/source/wav.c"
+g++ -O2 -g -Wall -Wextra -o "$work/test_mixer_host" "$here/test_mixer_host.c" \
+    "$root/xenon/source/xenon_audio.cpp" "$root/xenon/source/wav.c" -lm
 gcc -O2 -g -Wall -Wextra -o "$work/gen_wav" "$here/gen_wav.c" -lm
 mkdir -p "$work/wavs"
 "$work/gen_wav" "$work/wavs"
@@ -62,6 +64,10 @@ echo "== test_blit_host (colour / blend / endian math) =="
 echo
 echo "== test_wav_host (WAV decode / resample) =="
 "$work/test_wav_host" "$work/wavs"
+
+echo
+echo "== test_mixer_host (voice lifetime / stealing / saturation) =="
+"$work/test_mixer_host"
 
 echo
 echo "== test_fat32_host (FAT32 driver vs real image) =="

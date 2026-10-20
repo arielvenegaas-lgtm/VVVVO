@@ -334,6 +334,7 @@ Game::Game(void)//:mutebutton(0)
         {
             std::string pKey(pElem->Value());
             const char* pText = pElem->GetText() ;
+            if (pText == NULL) pText = "";
 
             if (pKey == "summary")
             {
@@ -4128,6 +4129,7 @@ void Game::loadstats( MapClass& map, Graphics& dwgfx )
     {
         std::string pKey(pElem->Value());
         const char* pText = pElem->GetText() ;
+        if (pText == NULL) pText = "";
 
         if (pKey == "unlock")
         {
@@ -4826,6 +4828,10 @@ void Game::loadquick( MapClass& map, EntityClass& obj, MusicClass& music )
                     obj.flags.push_back(atoi(values[i].c_str()));
                 }
             }
+            // Keep a full 100-entry flag array even if the save is short/missing,
+            // so later obj.flags[42] etc. accesses stay in range (the original
+            // allocates exactly 100 in Entity.cpp).
+            while(obj.flags.size() < 100) obj.flags.push_back(0);
         }
 
         if (pKey == "crewstats")
@@ -5048,6 +5054,10 @@ void Game::customloadquick(std::string savfile, MapClass& map, EntityClass& obj,
                     obj.flags.push_back(atoi(values[i].c_str()));
                 }
             }
+            // Keep a full 100-entry flag array even if the save is short/missing,
+            // so later obj.flags[42] etc. accesses stay in range (the original
+            // allocates exactly 100 in Entity.cpp).
+            while(obj.flags.size() < 100) obj.flags.push_back(0);
         }
 
         if (pKey == "moods")
@@ -6285,6 +6295,10 @@ void Game::loadtele( MapClass& map, EntityClass& obj, MusicClass& music )
                     obj.flags.push_back(atoi(values[i].c_str()));
                 }
             }
+            // Keep a full 100-entry flag array even if the save is short/missing,
+            // so later obj.flags[42] etc. accesses stay in range (the original
+            // allocates exactly 100 in Entity.cpp).
+            while(obj.flags.size() < 100) obj.flags.push_back(0);
         }
 
         if (pKey == "crewstats")

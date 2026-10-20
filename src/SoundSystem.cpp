@@ -66,6 +66,9 @@ static void RegisterSfxOnce() {
         kMappedSfx[i] = storage[i];
     }
     XenonAudio_SetSfxList(kMappedSfx, kSfxCount);
+#if defined(XENON)
+    XenonAudio_Preload();   // decode now; avoid a hitch on the first effect use
+#endif
 }
 
 MusicTrack::MusicTrack(const char* fileName)

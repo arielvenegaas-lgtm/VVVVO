@@ -24,16 +24,19 @@ int FILESYSTEM_init()
 		return 0;
 	}
 
-	/* Log file; printf alternative */
-	fs::makedir("D:\\user\\logs");
-	if(!fs::exists(dateLog.c_str())) fs::makefile(dateLog.c_str());
-	fs::overwritefile(dateLog.c_str(), "");
-
+	// Create the user tree parents-first (Fat32V_Mkdir needs the parent to
+	// exist); without this the leading "logs" mkdir can fail and disable
+	// logging for the whole session.
 	if(!fs::exists("D:\\user")) fs::makedir("D:\\user");
+	if(!fs::exists("D:\\user\\logs")) fs::makedir("D:\\user\\logs");
 	if(!fs::exists("D:\\user\\saves")) fs::makedir("D:\\user\\saves");
 	if(!fs::exists("D:\\user\\levels")) fs::makedir("D:\\user\\levels");
 	if(!fs::exists("D:\\data")) fs::makedir("D:\\data");
 	if(!fs::exists("D:\\data\\music")) fs::makedir("D:\\data\\music");
+
+	/* Log file; printf alternative */
+	if(!fs::exists(dateLog.c_str())) fs::makefile(dateLog.c_str());
+	fs::overwritefile(dateLog.c_str(), "");
 
 	//Check if data exists; would be better to check for all but ehh
 	if(!fs::exists("D:\\data\\graphics\\font.png"))
@@ -59,17 +62,32 @@ char *FILESYSTEM_getUserLevelDirectory()
 
 void FILESYSTEM_loadFileToMemory(const char* name, char** mem, size_t* len)
 {
+	*mem = NULL;
+	if (len) *len = 0;
+
 	long length = (long)fs::size(name);
+	if (length <= 0 || length > (long)(64 * 1024 * 1024))
+	{
+		// Missing, empty, or absurdly large: treat as "not found" so callers
+		// take their error branch instead of parsing an empty buffer.
+		return;
+	}
+
 	// Allocate one extra byte so callers that treat the result as a text
 	// buffer (TinyXML, level parsing) always see a terminating NUL.
-	*mem = (char*) malloc(length + 1);
-	if (length > 0 && *mem)
+	char *buf = (char*) malloc((size_t)length + 1);
+	if (!buf) return;
+
+	long got = Fat32V_ReadFile(FsVolume(), MapPath(name), buf, (uint32_t)length);
+	if (got < 0 || got != length)
 	{
-		long got = Fat32V_ReadFile(FsVolume(), MapPath(name), *mem, (uint32_t)length);
-		if (got < 0) got = 0;
-		length = got;
+		// Short/corrupt read: free and report not-found rather than handing
+		// back a truncated document.
+		free(buf);
+		return;
 	}
-	if (*mem) (*mem)[length] = '\0';
+	buf[length] = '\0';
+	*mem = buf;
 	if (len) *len = (size_t)length;
 }
 

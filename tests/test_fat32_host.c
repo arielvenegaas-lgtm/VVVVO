@@ -142,6 +142,51 @@ int main(int argc, char **argv) {
         CHECK(cx.n >= 2, "callback invoked for each entry");
     }
 
+    /* --- rename (same directory) --- */
+    {
+        const char *orig = "rename-source-data";
+        CHECK(Fat32V_WriteFile(fs, "/user/saves/r1.vvv", orig, (uint32_t)strlen(orig)) == 1,
+              "write rename source");
+        CHECK(Fat32V_Rename(fs, "/user/saves/r1.vvv", "/user/saves/r2.vvv") == 1,
+              "rename r1 -> r2");
+        CHECK(Fat32V_Exists(fs, "/user/saves/r1.vvv") == 0, "rename removed source name");
+        CHECK(Fat32V_Exists(fs, "/user/saves/r2.vvv") == 1, "rename created target name");
+        char buf[64]; memset(buf, 0, sizeof(buf));
+        long n = read_whole(fs, "/user/saves/r2.vvv", buf, sizeof(buf) - 1);
+        CHECK(n == (long)strlen(orig) && strcmp(buf, orig) == 0,
+              "rename preserved file contents");
+        Fat32V_Unlink(fs, "/user/saves/r2.vvv");
+    }
+
+    /* --- rename over an existing file (atomic replace) --- */
+    {
+        CHECK(Fat32V_WriteFile(fs, "/user/saves/old.vvv", "OLDDATA", 7) == 1, "write old.vvv");
+        CHECK(Fat32V_WriteFile(fs, "/user/saves/new.vvv", "NEWDATA-bigger", 14) == 1, "write new.vvv");
+        CHECK(Fat32V_Rename(fs, "/user/saves/new.vvv", "/user/saves/old.vvv") == 1,
+              "rename new.vvv over old.vvv");
+        char buf[64]; memset(buf, 0, sizeof(buf));
+        long n = read_whole(fs, "/user/saves/old.vvv", buf, sizeof(buf) - 1);
+        CHECK(n == 14 && strcmp(buf, "NEWDATA-bigger") == 0, "replace yielded new contents");
+        CHECK(Fat32V_Exists(fs, "/user/saves/new.vvv") == 0, "source name gone after replace");
+        Fat32V_Unlink(fs, "/user/saves/old.vvv");
+    }
+
+    /* --- atomic write leaves no temp file and replaces content --- */
+    {
+        const char *v1 = "SAVE-VERSION-1-LONG";
+        const char *v2 = "v2";
+        CHECK(Fat32V_WriteFile(fs, "/user/saves/atomic.vvv", v1, (uint32_t)strlen(v1)) == 1,
+              "atomic write v1");
+        CHECK(Fat32V_WriteFile(fs, "/user/saves/atomic.vvv", v2, (uint32_t)strlen(v2)) == 1,
+              "atomic overwrite v2");
+        char buf[64]; memset(buf, 0, sizeof(buf));
+        long n = read_whole(fs, "/user/saves/atomic.vvv", buf, sizeof(buf) - 1);
+        CHECK(n == (long)strlen(v2) && strcmp(buf, v2) == 0, "atomic overwrite truncated + correct");
+        CHECK(Fat32V_Exists(fs, "/user/saves/.vvv_tmp") == 0, "no stale temp file after write");
+        Fat32V_Unlink(fs, "/user/saves/atomic.vvv");
+    }
+
+    /* --- truncated-chain read must not over-read (bounds) --- */
     Fat32_Close(fs);
     close(disk.fd);
 
