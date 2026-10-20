@@ -298,6 +298,9 @@ static void MixMusic(int16_t *out, int frames) {
     for (int f = 0; f < frames; ++f) {
         if (g_music.pos >= (double)g_music.buf_frames) {
             if (!MusicRefill()) return; /* decoder exhausted; stop mixing */
+            /* Defensive: if refill still left nothing readable, stop rather
+             * than sampling an invalid index. */
+            if (g_music.buf_frames <= 0 || g_music.pos >= (double)g_music.buf_frames) return;
         }
         int16_t l, r;
         MusicSample(&l, &r);
