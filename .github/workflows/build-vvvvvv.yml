@@ -1,7 +1,8 @@
-name: build-vvvvvv (libXenon ELF32)
+name: build-vvvvvv
 
-# Builds the bare-metal Xbox 360 port with the free60 libXenon toolchain.
-# The ELF contains no game assets: users supply their own VVVVVV data/ tree.
+# Builds the bare-metal Xbox 360 port with the free60 libXenon toolchain, and
+# runs the host (Linux) test suite. The ELF contains no game assets: users
+# supply their own VVVVVV data/ tree.
 
 on:
   push:
@@ -10,6 +11,18 @@ on:
   workflow_dispatch:
 
 jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y mtools
+
+      - name: Run host test suite
+        run: bash tests/run_host_tests.sh
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -22,7 +35,7 @@ jobs:
       - name: Build vvvvvv.elf32
         run: |
           docker run --rm -v "$PWD":/app -w /app free60/libxenon:latest \
-            bash -lc 'set -e; echo "DEVKITXENON=$DEVKITXENON"; make -C xenon'
+            bash -lc 'set -e; echo "DEVKITXENON=$DEVKITXENON"; make -C xenon -j"$(nproc)"'
 
       - name: Verify output is a PowerPC ELF32
         run: python3 ci/verify_elf.py xenon/vvvvvv.elf32
