@@ -23,11 +23,15 @@ enum {
     PAD_UP     = 0x0100,
     PAD_DOWN   = 0x0200,
     PAD_LEFT   = 0x0400,
-    PAD_RIGHT  = 0x0800
+    PAD_RIGHT  = 0x0800,
+    PAD_LS     = 0x1000,
+    PAD_RS     = 0x2000,
+    PAD_GUIDE  = 0x4000
 };
 
 typedef struct {
     int      connected;
+    int      disconnected;   /* went away this frame (edge) */
     float    lx, ly, rx, ry; /* left/right sticks, -1..1 (deadzone applied) */
     uint8_t  lt, rt;         /* triggers, 0..255 */
     uint16_t buttons;        /* held this frame */

@@ -87,14 +87,28 @@ The game draws entirely into CPU `SDL_Surface`s (320×240, 32bpp) with
 `SDL_BlitSurface`, `SDL_FillRect`, `SDL_MapRGB` and direct pixel access. No
 GPU features are required. `Screen::FlipScreen()` hands the finished surface to
 `VvvvoGfx_Present()`, which integer-scales it into the scan-out and flushes the
-data cache.
+data cache. The present path clips the centred rect to the scan-out and never
+computes a negative origin, so a scan-out smaller than the source cannot write
+out of bounds. `SDL_BlitSurface` converts source→destination components by
+their masks and only writes an alpha byte when the destination has an alpha
+channel; `GetSubSurface` inherits the source surface's format so the blit is a
+same-format copy.
 
 ### 3. Input event numbers
 
 `KeyPoll.cpp` checks **literal** event types `1536` (axis), `1538` (dpad),
 `1539`/`1540` (button down/up) — the joystick-range numbers used by the Xbox
 SDL2x build. The libXenon input backend must synthesise those exact numbers
-(plus `SDL_CONTROLLERDEVICEADDED`) and fill `caxis`/`cbutton`/`cdevice`.
+(plus `SDL_CONTROLLERDEVICEADDED`/`REMOVED`) and fill `caxis`/`cbutton`/`cdevice`.
+
+Button indices are real `SDL_GameControllerButton` values (A=0, B=1, X=2, Y=3,
+BACK=4, GUIDE=5, START=6, LS=7, RS=8, LB=9, RB=10, DPAD=11..14). The left stick
+is delivered as `SDL_CONTROLLER_AXIS_LEFTX/LEFTY` (0/1) with **Y inverted** to
+SDL's convention (positive = down), because libXenon reports stick-up as
+positive. When no fresh USB report arrives for ~2 s the pad is treated as
+disconnected: a `SDL_CONTROLLERDEVICEREMOVED` is emitted once and every held
+button/stick is released, so an unplug cannot leave a button latched down.
+*(Y polarity and disconnect timing need hardware confirmation.)*
 
 ### 4. Filesystem
 

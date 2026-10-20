@@ -52,6 +52,13 @@ static void UsbPollControllers(void) {
 static PadState g_cur[PAD_COUNT];
 static PadState g_prev[PAD_COUNT];
 static int      g_seen[PAD_COUNT]; /* sticky "have we ever heard from port N" */
+static int      g_stale[PAD_COUNT]; /* frames since the last fresh report */
+
+/* libXenon gives no detach event: get_controller_data() simply stops returning
+ * fresh reports. After this many frames without one we declare the pad gone,
+ * release everything it was holding, and let the SDL shim emit a DEVICEREMOVED.
+ * ~60 frames is ~2 s at 30 FPS, long enough not to false-positive on a stall. */
+#define PAD_STALE_LIMIT 60
 
 static float NormalizeStick(int16_t v) {
     int iv = (int)v;
@@ -67,6 +74,7 @@ void Input_Init(void) {
     memset(g_cur, 0, sizeof(g_cur));
     memset(g_prev, 0, sizeof(g_prev));
     memset(g_seen, 0, sizeof(g_seen));
+    memset(g_stale, 0, sizeof(g_stale));
 
     /* Bring up libXenon's USB stack. Without this the pad driver is never
      * serviced, get_controller_data() never reports a controller, and the
@@ -84,33 +92,54 @@ void Input_Poll(void) {
         memset(&d, 0, sizeof(d));
 
         int fresh = get_controller_data(&d, i);
-        if (fresh) g_seen[i] = 1;
+        if (fresh) { g_seen[i] = 1; g_stale[i] = 0; }
+        else if (g_seen[i] && g_stale[i] < PAD_STALE_LIMIT) g_stale[i]++;
+
+        int was_connected = g_cur[i].connected;
+        int now_connected = g_seen[i] && g_stale[i] < PAD_STALE_LIMIT;
 
         PadState p;
         memset(&p, 0, sizeof(p));
 
-        if (g_seen[i]) {
+        if (now_connected) {
             p.connected = 1;
 
-            if (d.a)     p.buttons |= PAD_A;
-            if (d.b)     p.buttons |= PAD_B;
-            if (d.x)     p.buttons |= PAD_X;
-            if (d.y)     p.buttons |= PAD_Y;
-            if (d.start) p.buttons |= PAD_START;
-            if (d.back)  p.buttons |= PAD_BACK;
-            if (d.lb)    p.buttons |= PAD_LB;
-            if (d.rb)    p.buttons |= PAD_RB;
-            if (d.up)    p.buttons |= PAD_UP;
-            if (d.down)  p.buttons |= PAD_DOWN;
-            if (d.left)  p.buttons |= PAD_LEFT;
-            if (d.right) p.buttons |= PAD_RIGHT;
+            if (fresh) {
+                if (d.a)     p.buttons |= PAD_A;
+                if (d.b)     p.buttons |= PAD_B;
+                if (d.x)     p.buttons |= PAD_X;
+                if (d.y)     p.buttons |= PAD_Y;
+                if (d.start) p.buttons |= PAD_START;
+                if (d.back)  p.buttons |= PAD_BACK;
+                if (d.lb)    p.buttons |= PAD_LB;
+                if (d.rb)    p.buttons |= PAD_RB;
+                if (d.up)    p.buttons |= PAD_UP;
+                if (d.down)  p.buttons |= PAD_DOWN;
+                if (d.left)  p.buttons |= PAD_LEFT;
+                if (d.right) p.buttons |= PAD_RIGHT;
+                if (d.s1_z)  p.buttons |= PAD_LS;
+                if (d.s2_z)  p.buttons |= PAD_RS;
+                if (d.logo)  p.buttons |= PAD_GUIDE;
 
-            p.lx = NormalizeStick(d.s1_x);
-            p.ly = NormalizeStick(d.s1_y);
-            p.rx = NormalizeStick(d.s2_x);
-            p.ry = NormalizeStick(d.s2_y);
-            p.lt = (d.lt > TRIGGER_THRESH) ? d.lt : 0;
-            p.rt = (d.rt > TRIGGER_THRESH) ? d.rt : 0;
+                p.lx = NormalizeStick(d.s1_x);
+                p.ly = NormalizeStick(d.s1_y);
+                p.rx = NormalizeStick(d.s2_x);
+                p.ry = NormalizeStick(d.s2_y);
+                p.lt = (d.lt > TRIGGER_THRESH) ? d.lt : 0;
+                p.rt = (d.rt > TRIGGER_THRESH) ? d.rt : 0;
+            } else {
+                /* No new report this frame: hold the previous state so a
+                 * stationary held button does not flicker off. */
+                p.buttons = (uint16_t)g_cur[i].buttons;
+                p.lx = g_cur[i].lx; p.ly = g_cur[i].ly;
+                p.rx = g_cur[i].rx; p.ry = g_cur[i].ry;
+                p.lt = g_cur[i].lt; p.rt = g_cur[i].rt;
+            }
+        } else if (was_connected) {
+            /* The pad just went away: report it once and release everything it
+             * was holding (otherwise the last report latches forever). */
+            p.connected = 0;
+            p.disconnected = 1;
         }
 
         /* Edge detection must compare against the PREVIOUS frame's state.

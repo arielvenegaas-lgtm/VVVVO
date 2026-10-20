@@ -124,6 +124,64 @@ int main(void) {
         CHECK(be_read32(buf) == pixel, "BE write/read round-trip");
     }
 
+    /* --- blit core: RGBA8888 source -> ARGB8888 destination --- */
+    {
+        /* Image surface (lodepng output, big-endian word): R high, A low. */
+        SdlFmt sf = { 0xff000000, 0x00ff0000, 0x0000ff00, 0x000000ff, 24, 16, 8, 0 };
+        /* Screen surface: 0x00RRGGBB, no alpha channel used. */
+        SdlFmt df = { 0x00ff0000, 0x0000ff00, 0x000000ff, 0x00000000, 16, 8, 0, 0 };
+
+        uint32_t imgword = be_read32((const uint8_t[]){ 0xAA, 0xBB, 0xCC, 0x80 }); /* R,G,B,A */
+        uint32_t out = 0;
+        int wrote = sdl_blit_pixel(imgword, &sf, &df, 0, 255, &out);
+        CHECK(wrote == 1, "opaque copy produces a pixel");
+        CHECK((out & 0x00ff0000) >> 16 == 0xAA, "RGBA->ARGB: R lands in R");
+        CHECK((out & 0x0000ff00) >> 8  == 0xBB, "RGBA->ARGB: G lands in G");
+        CHECK((out & 0x000000ff)       == 0xCC, "RGBA->ARGB: B lands in B");
+        CHECK((out & 0xff000000) == 0, "non-alpha dest gets no forced alpha");
+    }
+
+    /* --- fully transparent source pixel is skipped under blend --- */
+    {
+        SdlFmt sf = { 0xff000000, 0x00ff0000, 0x0000ff00, 0x000000ff, 24, 16, 8, 0 };
+        SdlFmt df = { 0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000, 16, 8, 0, 24 };
+        uint32_t transparent = be_read32((const uint8_t[]){ 0x11, 0x22, 0x33, 0x00 });
+        uint32_t out = 0xDEADBEEF;
+        CHECK(sdl_blit_pixel(transparent, &sf, &df, 1, 255, &out) == 0,
+              "A=0 source pixel is skipped (not composited)");
+    }
+
+    /* --- source-over uses the actual source alpha --- */
+    {
+        SdlFmt sf = { 0xff000000, 0x00ff0000, 0x0000ff00, 0x000000ff, 24, 16, 8, 0 };
+        SdlFmt df = { 0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000, 16, 8, 0, 24 };
+        /* 50% red (R=255,A=128) over opaque blue. */
+        uint32_t srcc = be_read32((const uint8_t[]){ 0xFF, 0x00, 0x00, 0x80 });
+        uint32_t dstc = 0x000000FFu; /* R=0 G=0 B=255 */
+        uint32_t out = sdl_blit_over(srcc, dstc, &sf, &df, 128);
+        uint32_t r = (out & 0x00ff0000) >> 16, b = out & 0xff;
+        CHECK(r > 120 && r < 135, "over: red ~128");
+        CHECK(b > 120 && b < 135, "over: blue ~128");
+        CHECK((out & 0xff000000) == 0xff000000u, "alpha dest forced opaque");
+    }
+
+    /* --- alpha-only-on-dest: A=255 fast path preserves source alpha --- */
+    {
+        SdlFmt sf = { 0xff000000, 0x00ff0000, 0x0000ff00, 0x000000ff, 24, 16, 8, 0 };
+        SdlFmt df = sf; /* same format, alpha present */
+        uint32_t c = be_read32((const uint8_t[]){ 0x40, 0x80, 0xC0, 0x7F });
+        uint32_t out = 0;
+        sdl_blit_pixel(c, &sf, &df, 0, 255, &out);
+        CHECK(out == c, "same-format copy is bit-exact (alpha preserved)");
+    }
+
+    /* --- sdl_put is masked; sdl_get ignores zero masks --- */
+    {
+        CHECK(sdl_put(0xFF, 0x00FF0000, 16) == 0x00FF0000, "sdl_put places into mask");
+        CHECK(sdl_put(0xFF, 0x00000000, 0) == 0, "sdl_put with no mask yields 0");
+        CHECK(sdl_get(0x12345678u, 0, 0) == 0, "sdl_get with no mask yields 0");
+    }
+
     printf("\n%s (%d failure%s)\n",
            g_fail ? "TESTS FAILED" : "ALL TESTS PASSED",
            g_fail, g_fail == 1 ? "" : "s");

@@ -121,11 +121,15 @@ int SDL_BlitSurface(SDL_Surface *src,const SDL_Rect *srcrect,SDL_Surface *dst,co
   if(dx+sw>dst->w) sw=dst->w-dx; if(dy+sh>dst->h) sh=dst->h-dy;
   if(sw<=0||sh<=0) return 0;
 
-  const SDL_PixelFormat *sf=src->format, *df=dst->format;
-  int same = (sf->Rshift==df->Rshift && sf->Gshift==df->Gshift &&
-              sf->Bshift==df->Bshift && sf->Ashift==df->Ashift &&
-              sf->Amask==df->Amask);
-  int blend = (src->blendMode==SDL_BLENDMODE_BLEND) && sf->Amask && src->alphaMod;
+  const SDL_PixelFormat *sfp=src->format, *dfp=dst->format;
+  SdlFmt sf = { sfp->Rmask, sfp->Gmask, sfp->Bmask, sfp->Amask,
+                (uint8_t)sfp->Rshift, (uint8_t)sfp->Gshift, (uint8_t)sfp->Bshift, (uint8_t)sfp->Ashift };
+  SdlFmt df = { dfp->Rmask, dfp->Gmask, dfp->Bmask, dfp->Amask,
+                (uint8_t)dfp->Rshift, (uint8_t)dfp->Gshift, (uint8_t)dfp->Bshift, (uint8_t)dfp->Ashift };
+  int same = (sf.Rshift==df.Rshift && sf.Gshift==df.Gshift &&
+              sf.Bshift==df.Bshift && sf.Ashift==df.Ashift &&
+              sf.Amask==df.Amask);
+  int blend = (src->blendMode==SDL_BLENDMODE_BLEND) && sf.Amask && src->alphaMod;
 
   for(int y=0;y<sh;y++){
     Uint32 *srow=(Uint32*)((char*)src->pixels + (size_t)(sy+y)*src->pitch) + sx;
@@ -138,38 +142,17 @@ int SDL_BlitSurface(SDL_Surface *src,const SDL_Rect *srcrect,SDL_Surface *dst,co
 
     for(int x=0;x<sw;x++){
       Uint32 c=srow[x];
-      Uint32 A = sf->Amask ? ((c & sf->Amask) >> sf->Ashift) : 255u;
+      Uint32 out;
+      Uint32 A = sf.Amask ? ((c & sf.Amask) >> sf.Ashift) : 255u;
 
       if(blend){
         A = Div255(A * src->alphaMod);
         if(A==0) continue;
-        if(A==255){ drow[x] = same ? c
-                    : ((((c & sf->Rmask)>>sf->Rshift) << df->Rshift) |
-                       (((c & sf->Gmask)>>sf->Gshift) << df->Gshift) |
-                       (((c & sf->Bmask)>>sf->Bshift) << df->Bshift) |
-                       (255u << df->Ashift));
-                    continue; }
-        Uint32 d=drow[x];
-        Uint32 dr=df->Rmask?((d & df->Rmask)>>df->Rshift):0u;
-        Uint32 dg=df->Gmask?((d & df->Gmask)>>df->Gshift):0u;
-        Uint32 db=df->Bmask?((d & df->Bmask)>>df->Bshift):0u;
-        Uint32 sr=(c & sf->Rmask)>>sf->Rshift;
-        Uint32 sg=(c & sf->Gmask)>>sf->Gshift;
-        Uint32 sb=(c & sf->Bmask)>>sf->Bshift;
-        Uint32 ia=255u-A;
-        Uint32 r=Div255(sr*A + dr*ia);
-        Uint32 gg=Div255(sg*A + dg*ia);
-        Uint32 b=Div255(sb*A + db*ia);
-        Uint32 out=(r<<df->Rshift)|(gg<<df->Gshift)|(b<<df->Bshift);
-        if(df->Amask) out|=(255u<<df->Ashift);
-        drow[x] = out;
+        if(A==255){ sdl_blit_pixel(c,&sf,&df,0,255,&out); drow[x]=out; continue; }
+        drow[x] = sdl_blit_over(c, drow[x], &sf, &df, A);
       } else {
-        Uint32 out=same ? c
-          : ((((c & sf->Rmask)>>sf->Rshift) << df->Rshift) |
-             (((c & sf->Gmask)>>sf->Gshift) << df->Gshift) |
-             (((c & sf->Bmask)>>sf->Bshift) << df->Bshift));
-        if(!same && df->Amask) out|=(A << df->Ashift);
-        drow[x] = out;
+        sdl_blit_pixel(c,&sf,&df,0,255,&out);
+        drow[x]=out;
       }
     }
   }
@@ -218,13 +201,25 @@ int SDL_PollEvent(SDL_Event *event){
     return 1;
   }
 
-  if (!p || !p->connected) return 0;
+  if (!p || !p->connected) {
+    if (p && p->disconnected && s_have_pad) {
+      s_have_pad = 0;
+      memset(s_prev_buttons, 0, sizeof(s_prev_buttons));
+      s_axis_lx = s_axis_ly = 0;
+      memset(event, 0, sizeof(*event));
+      event->type = SDL_CONTROLLERDEVICEREMOVED;
+      event->cdevice.which = 0;
+      return 1;
+    }
+    return 0;
+  }
   s_have_pad = 1;
 
   /* Physical button -> SDL_GameControllerButton mapping. */
   static const struct { int pad; int sdl; } map[] = {
     { PAD_A, 0 }, { PAD_B, 1 }, { PAD_X, 2 }, { PAD_Y, 3 },
     { PAD_BACK, 4 }, { PAD_START, 6 },
+    { PAD_GUIDE, 5 }, { PAD_LS, 7 }, { PAD_RS, 8 },
     { PAD_LB, 9 }, { PAD_RB, 10 },
     { PAD_UP, 11 }, { PAD_DOWN, 12 }, { PAD_LEFT, 13 }, { PAD_RIGHT, 14 },
   };
@@ -238,9 +233,11 @@ int SDL_PollEvent(SDL_Event *event){
     }
   }
 
-  /* Left stick -> axis events (only when the sign/magnitude changes). */
+  /* Left stick -> axis events (only when the sign/magnitude changes).
+   * libXenon reports stick-up as positive Y, but SDL's axis convention (and the
+   * game's menu navigation) treats positive as down, so invert Y. */
   int lx = (int)(p->lx * 32767.0f);
-  int ly = (int)(p->ly * 32767.0f);
+  int ly = (int)(-p->ly * 32767.0f);
   if (lx != s_axis_lx) {
     s_axis_lx = lx;
     memset(event, 0, sizeof(*event));
