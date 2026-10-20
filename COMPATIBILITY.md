@@ -22,16 +22,18 @@ dependency with a libXenon one.
 | Input | Wired to libXenon USB pad reports (SDL event synthesis) |
 | Filesystem | Implemented: FAT32 on USB mass storage; `fopen`/`remove` routed through it |
 | Frame rate | Authentic 30 Hz simulation (34/41/55/83 ms), renderer optimised |
-| Audio | **Sound effects play** (WAV → 48 kHz S16 stereo via `xenon_sound`); music is silent |
-| CI | Dockerized libXenon build workflow |
+| Audio | **Sound effects and music play** (WAV SFX + Ogg Vorbis music → 48 kHz S16 stereo via `xenon_sound`) |
+| CI | Dockerized libXenon build workflow + host test suite |
 
-> **Sound effects are implemented; music is not.** `CSound::Create(t,p)` maps the
-> 28 effect indices to `data/sounds/*.wav`, which are decoded (PCM 8/16-bit,
-> mono/stereo, any rate) and mixed in software with linear-interpolation
-> resampling to the DAC's 48 kHz S16 stereo format (`xenon/source/wav.c`,
-> `xenon/source/xenon_audio.cpp`). The original soundtrack is **Ogg Vorbis**,
-> which would need a Vorbis decoder, so music remains silent by design; the
-> game's music call sites stay dormant and gameplay is unaffected.
+> **Audio is implemented.** `CSound::Create(t,p)` maps the 28 effect indices to
+> `data/sounds/*.wav`, decoded (PCM 8/16-bit, mono/stereo, any rate) and mixed
+> in software with linear-interpolation resampling to the DAC's 48 kHz S16
+> stereo format (`xenon/source/wav.c`, `xenon/source/xenon_audio.cpp`). Music is
+> decoded from the game's embedded Ogg Vorbis blob by **stb_vorbis** (vendored,
+> public domain) and streamed through the same mixer at the game's music volume
+> (`xenon/source/stb_vorbis.c`, `xenon_stb_vorbis.c`). Ogg tracks loop when the
+> stream ends. Music and effects share the DAC ring. *(Audio output still needs
+> hardware confirmation; the decode/mix path is covered by host tests.)*
 
 ---
 
@@ -52,7 +54,7 @@ Everything that is pure game logic runs unmodified:
 |---------------------|------------------------------|---------|
 | `xapilib` `XInputGetState` | `usb_init` + `get_controller_data` | `xenon/source/input.cpp` |
 | `d3d8`/`d3dx8`/shaders (D3D9 path in dxs360) | Xenos scan-out framebuffer | `xenon/source/gfx.cpp`, `game_gfx.cpp` |
-| `DirectMusic8` (`dmusici.h`) | SFX via `xenon_sound` (software WAV mixer); music silent | `src/SoundSystem.cpp`, `xenon/source/xenon_audio.cpp`, `xenon/source/wav.c` |
+| `DirectMusic8` (`dmusici.h`) | SFX via `xenon_sound` (software WAV mixer); music via stb_vorbis Ogg decoder | `src/SoundSystem.cpp`, `xenon/source/xenon_audio.cpp`, `wav.c`, `stb_vorbis.c` |
 | Win32 `FindFirstFile`/`CreateDirectory`/`CreateFile` | `fat32.c` FAT32 driver | `src/filesystem.h`, `xenon/source/platform_fs.cpp` |
 | libc `fopen`/`fread`/`fwrite`/`fseek` (lodepng, TinyXML, `ifstream`) | link-time `--wrap=fopen` → `funopen()` over FAT32 | `xenon/source/platform_file.cpp` |
 | libc `remove` (save deletion) | link-time `--wrap=remove` → `Fat32V_Unlink` | `xenon/source/platform_file.cpp` |
@@ -124,7 +126,7 @@ Expected layout on the USB stick:
 
 ```
 /data/graphics/*.png
-/data/music/*.wav        (not played — soundtrack is Ogg Vorbis; see Audio above)
+/data/music/*.ogg        (decoded by stb_vorbis and streamed to the DAC)
 /data/sounds/*.wav       (decoded and mixed to the DAC)
 /user/saves/
 /user/levels/

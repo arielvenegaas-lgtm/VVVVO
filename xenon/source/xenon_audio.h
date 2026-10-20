@@ -4,8 +4,8 @@
  * WAV sound effects are loaded from the game's data/sounds tree through the
  * FAT32 layer and mixed in software with linear-interpolation resampling.
  *
- * Music is intentionally NOT handled here: the original VVVVVV soundtrack is
- * Ogg Vorbis, which would need a Vorbis decoder. See COMPATIBILITY.md.
+ * Music is decoded from the game's embedded Ogg Vorbis blob with stb_vorbis
+ * and streamed through the same mixer at a fixed volume.
  */
 #pragma once
 
@@ -41,6 +41,22 @@ void XenonAudio_StopAll(void);
 
 /* Total number of voices that failed to load (diagnostics). */
 int  XenonAudio_LoadFailures(void);
+
+/* --- music (Ogg Vorbis) ------------------------------------------------- */
+
+/* Loads a music track from an in-memory Ogg Vorbis blob and starts playing it
+ * (looping). Replaces any current track. `name` is only used for diagnostics.
+ * Returns 1 on success (decoder opened), 0 on failure. */
+int  XenonAudio_MusicPlay(const void *ogg_data, unsigned len, const char *name);
+
+/* Stops and releases the current music track. */
+void XenonAudio_MusicStop(void);
+
+/* Sets music volume, 0..128 (the game's own scale). */
+void XenonAudio_MusicSetVolume(int vol);
+
+/* Whether a music track is currently decoding. */
+int  XenonAudio_MusicIsPlaying(void);
 
 /* --- host-test hooks (no-op / used only by tests/ on Linux) ------------- */
 

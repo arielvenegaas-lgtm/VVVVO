@@ -236,7 +236,7 @@ typedef enum {
   SDL_CONTROLLER_AXIS_TRIGGERRIGHT = 5
 } SDL_GameControllerAxis;
 
-typedef struct SDL_RWops {} SDL_RWops;
+typedef struct SDL_RWops { const unsigned char *data; unsigned size; unsigned pos; } SDL_RWops;
 SDL_RWops *SDL_RWFromMem(void *mem, int size);
 int SDL_RWread(SDL_RWops *rw,void *ptr,int size,int n);
 int SDL_RWclose(SDL_RWops *rw);

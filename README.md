@@ -5,8 +5,8 @@ A bare-metal port of **VVVVVV** to the Xbox 360, built with
 Original port [XVVVVX](https://github.com/BttrDrgn/XVVVVX), reusing its game
 logic and replacing every XDK/Win32/SDL2 dependency with a libXenon one.
 
-> **Status:** graphics, input, FAT32 filesystem and **sound effects** are in
-> place; music is silent (the soundtrack is Ogg Vorbis). See
+> **Status:** graphics, input, FAT32 filesystem, **sound effects and music** are
+> in place (music via the vendored stb_vorbis Ogg decoder). See
 > [COMPATIBILITY.md](COMPATIBILITY.md).
 
 ## Requirements
@@ -20,24 +20,38 @@ logic and replacing every XDK/Win32/SDL2 dependency with a libXenon one.
 
 ```sh
 export DEVKITXENON=/usr/local/xenon
-make -C xenon
+./build.sh            # host tests + cross-build + ELF verify
 ```
 
-Output: `xenon/vvvvvv.elf32` (PowerPC big-endian ELF). Launch it from Aurora's
-File Manager or XeLL.
+`build.sh` runs the host test suite first, then builds, then checks the output
+is a big-endian PowerPC ELF32. Use `SKIP_CROSS=1 ./build.sh` to run only the
+tests, or `make -C xenon` for the cross-build alone. Output:
+`xenon/vvvvvv.elf32`. Launch it from Aurora's File Manager or XeLL.
 
 Or with Docker:
 
 ```sh
 docker run --rm -v "$PWD":/app -w /app free60/libxenon:latest \
-  bash -lc "make -C xenon"
+  bash -lc "./build.sh"
 ```
+
+## Tests
+
+```sh
+bash tests/run_host_tests.sh
+```
+
+Pure Linux/host tests (no console needed): the FAT32 driver against a real
+image (read/write, atomic replace, rename), the colour/blend and pixel-format
+math, the WAV decoder (malformed/truncated/unusual inputs) and the audio mixer
+(voice lifetime, stealing, saturation). These cannot prove the GPU/audio path
+works on hardware — that still needs a console.
 
 ## Runtime layout on the USB stick
 
 ```
 /data/graphics/*.png
-/data/music/*.wav      (not played — soundtrack is Ogg Vorbis)
+/data/music/*.ogg      (played: decoded by stb_vorbis)
 /data/sounds/*.wav     (played: WAV effects mixed to the DAC)
 /user/saves/
 /user/levels/
@@ -55,11 +69,13 @@ tinyxml/        XML parser (zlib license)
 xenon/          libXenon platform layer + SDL2 shim + build
   source/       gfx (Xenos), input (USB pad), fat32, sdlstub, game_gfx,
                 platform_file (fopen/remove over FAT32),
-                wav (PCM decoder), xenon_audio (xenon_sound mixer),
-                sdlblit (shared pixel/blend math)
+                wav (PCM decoder), stb_vorbis (Ogg Vorbis, vendored),
+                xenon_audio (xenon_sound mixer + music), sdlblit (shared
+                pixel/blend math)
   include/      (generated headers)
 display_test/   standalone Xenos colour-bar diagnostic
-tests/          host-side tests (FAT32 vs real image, colour/blend, WAV)
+tests/          host-side tests (FAT32 vs real image, colour/blend, WAV, mixer,
+                Ogg Vorbis decode)
 reference/      original XVVVVX files, kept for diffing the port
 ```
 
@@ -80,6 +96,6 @@ Xbox 360 controller (via libXenon USB):
 VVVVVV's source is under its custom non-commercial license; altered versions
 must be marked. The **game assets are proprietary and are NOT included** — you
 must supply your own `data/` from a legitimate copy. Vendored libraries:
-lodepng and tinyxml (zlib).
+lodepng and tinyxml (zlib), stb_vorbis (public domain).
 
 This port is not affiliated with Terry Cavanagh or the VVVVVV team.

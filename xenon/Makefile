@@ -53,7 +53,7 @@ GAME_SRC := \
 	Final.o Lab.o Other.o SpaceStation.o Tower.o Warp.o \
 	tinystr.o tinyxml.o tinyxmlerror.o tinyxmlparser.o
 
-PLATFORM_SRC := sdlstub.o game_gfx.o gfx.o input.o platform_fs.o platform_file.o platform_misc.o xenon_audio.o wav.o fat32.o
+PLATFORM_SRC := sdlstub.o game_gfx.o gfx.o input.o platform_fs.o platform_file.o platform_misc.o xenon_audio.o xenon_stb_vorbis.o wav.o fat32.o
 
 export OFILES   := $(PLATFORM_SRC) $(GAME_SRC)
 

@@ -75,12 +75,21 @@ MusicTrack::MusicTrack(const char* fileName)
 {
     (void)fileName;
     m_isValid = false;
+    m_data = 0;
+    m_size = 0;
 }
 
 MusicTrack::MusicTrack(SDL_RWops *rw)
 {
-    (void)rw;
+    m_data = 0;
+    m_size = 0;
     m_isValid = false;
+    if (rw && rw->data && rw->size)
+    {
+        m_data = rw->data;
+        m_size = rw->size;
+        m_isValid = true;
+    }
 }
 
 SoundTrack::SoundTrack(const char* fileName)
@@ -96,7 +105,27 @@ SoundSystem::SoundSystem()
 
 void SoundSystem::playMusic(MusicTrack* music)
 {
-    (void)music;
+    if (!music || !music->m_isValid || !music->m_data || !music->m_size)
+    {
+        XenonAudio_MusicStop();
+        return;
+    }
+    XenonAudio_MusicPlay(music->m_data, music->m_size, "music");
+}
+
+void SoundSystem::stopMusic()
+{
+    XenonAudio_MusicStop();
+}
+
+void SoundSystem::setMusicVolume(int vol)
+{
+    XenonAudio_MusicSetVolume(vol);
+}
+
+void SoundSystem::pauseMusic()
+{
+    XenonAudio_MusicStop();
 }
 
 bool hasmusic = false;

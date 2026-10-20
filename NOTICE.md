@@ -10,6 +10,10 @@
 - `tinyxml/` is (c) Lee Thomason, zlib license.
 - `xenon/source/fat32.c` is derived from the dxs360 project
   (https://github.com/arielvenegaas-lgtm/dxs360).
+- `xenon/source/stb_vorbis.c` is stb_vorbis by Sean Barrett
+  (https://github.com/nothings/stb), released into the public domain (or MIT,
+  at your option). Used unmodified; `xenon_stb_vorbis.c` / `stb_vorbis.h` are
+  thin build wrappers.
 - The VVVVVV art, graphics and music are proprietary and are NOT included in
   this repository. You must supply your own `data/` tree from a legitimate
   copy of the game.

@@ -168,8 +168,28 @@ Uint32 SDL_MapRGBA(const SDL_PixelFormat *fmt, Uint8 r,Uint8 g,Uint8 b,Uint8 a){
   if(!fmt) return ((Uint32)a<<24) | ((Uint32)r<<16) | ((Uint32)g<<8) | (Uint32)b;
   return ((Uint32)r << fmt->Rshift) | ((Uint32)g << fmt->Gshift) | ((Uint32)b << fmt->Bshift) | ((Uint32)a << fmt->Ashift);
 }
-SDL_RWops *SDL_RWFromMem(void *mem, int size){(void)mem;(void)size; return 0;}
-int SDL_RWread(SDL_RWops *rw,void *ptr,int size,int n){(void)rw;(void)ptr;(void)size;(void)n; return 0;}
+/* In-memory RWops over a blob (used for the embedded music tracks). We hand
+ * back the pointer/size so the music channel can decode it directly. */
+static SDL_RWops s_rw_pool[64];
+static int s_rw_used = 0;
+SDL_RWops *SDL_RWFromMem(void *mem, int size){
+  if (!mem || size < 0) return 0;
+  if (s_rw_used >= (int)(sizeof(s_rw_pool)/sizeof(s_rw_pool[0]))) return 0;
+  SDL_RWops *rw = &s_rw_pool[s_rw_used++];
+  rw->data = (const unsigned char *)mem;
+  rw->size = (unsigned)size;
+  rw->pos = 0;
+  return rw;
+}
+int SDL_RWread(SDL_RWops *rw,void *ptr,int size,int n){
+  if(!rw||!ptr||size<=0||n<=0) return 0;
+  unsigned want = (unsigned)size * (unsigned)n;
+  unsigned avail = rw->pos < rw->size ? rw->size - rw->pos : 0u;
+  unsigned give = want < avail ? want : avail;
+  if (give) memcpy(ptr, rw->data + rw->pos, give);
+  rw->pos += give;
+  return (int)(give / (unsigned)size);
+}
 int SDL_RWclose(SDL_RWops *rw){(void)rw; return 0;}
 /* KeyPoll.cpp checks the *joystick-range* event numbers used by the Xbox
  * SDL2x build: 0x600 axis, 0x603/0x604 button down/up. We synthesise those

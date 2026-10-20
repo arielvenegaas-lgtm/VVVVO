@@ -17,6 +17,11 @@
 #include <xenon_sound/sound.h>
 #endif
 
+/* stb_vorbis (vendored, public domain) is built by xenon_stb_vorbis.c. We only
+ * need the pull-data API plus integer (int16) output; stb_vorbis.h gives us the
+ * exact prototypes (notably stb_vorbis_get_info returns a struct by value). */
+#include "stb_vorbis.h"
+
 #define OUT_RATE      48000
 #define OUT_FRAMES    512              /* frames mixed per submit (= 2 KB) */
 #define MAX_VOICES    16
@@ -51,6 +56,31 @@ static int      g_failures = 0;
 static uint32_t g_seq = 0;
 
 static int16_t  g_out[OUT_FRAMES * 2];
+
+/* --- music -------------------------------------------------------------- */
+
+/* The decoder is streamed, not fully buffered: we keep a small window of
+ * already-decoded source-rate frames and pull more as the mixer consumes them.
+ * This keeps memory bounded (the soundtrack is several minutes long) at the
+ * cost of one stb_vorbis decode per few hundred output frames. */
+#define MUSIC_DECODE_MAX_FRAMES 4096
+
+struct Music {
+    int          active;
+    stb_vorbis  *dec;         /* decoder over the (persistent) ogg blob     */
+    const unsigned char *data;/* owned copy of the ogg blob                 */
+    unsigned     len;
+    unsigned     src_rate;
+    int          channels;    /* 1 or 2, from the stream                    */
+    double       pos;         /* fractional read position in `buf`          */
+    double       step;        /* source frames per output frame             */
+    int          vol;         /* 0..128                                     */
+    short        buf[MUSIC_DECODE_MAX_FRAMES * 2]; /* interleaved stereo     */
+    int          buf_frames;  /* valid frames in `buf`                      */
+};
+
+static Music g_music;
+static int   g_music_end_logged = 0;
 
 /* Provided by platform_fs / platform_file: read a whole mapped file. */
 extern "C" long FsReadWhole(const char *mapped_path, void **out_buf);
@@ -157,6 +187,130 @@ extern "C" void XenonAudio_PlaySfx(int index) {
     g_voices[v].seq    = ++g_seq;
 }
 
+/* --- music core --------------------------------------------------------- */
+
+static void MusicClose(void) {
+    if (g_music.dec) { stb_vorbis_close(g_music.dec); g_music.dec = 0; }
+    free((void *)g_music.data);
+    g_music.data = 0;
+    g_music.active = 0;
+    g_music.buf_frames = 0;
+    g_music.pos = 0.0;
+    g_music.len = 0;
+}
+
+/* Refills the decode window from the current read position. Concatenates the
+ * still-unconsumed tail (a frame at pos may straddle the buffer end) with fresh
+ * decoded frames. Returns 1 if it made progress. */
+static int MusicRefill(void) {
+    if (!g_music.dec) return 0;
+
+    int keep = 0;
+    if (g_music.pos < (double)g_music.buf_frames) {
+        keep = g_music.buf_frames - (int)g_music.pos;
+        if (keep < 0) keep = 0;
+        if (keep > 1) keep = 1; /* at most one straddling frame needs keeping */
+        if (keep == 1) {
+            int src = (int)g_music.pos;
+            g_music.buf[0] = g_music.buf[src * 2 + 0];
+            g_music.buf[1] = g_music.buf[src * 2 + 1];
+        }
+    }
+    g_music.pos -= (double)(g_music.buf_frames - keep);
+    if (g_music.pos < 0.0) g_music.pos = 0.0;
+
+    int want = MUSIC_DECODE_MAX_FRAMES - keep;
+    int got = stb_vorbis_get_samples_short_interleaved(
+        g_music.dec, 2, g_music.buf + keep * 2, want * 2);
+    g_music.buf_frames = keep + got;
+    if (got == 0) {
+        /* End of stream: loop back to the start (the game loops music too). */
+        stb_vorbis_seek_start(g_music.dec);
+        got = stb_vorbis_get_samples_short_interleaved(
+            g_music.dec, 2, g_music.buf + keep * 2, want * 2);
+        g_music.buf_frames = keep + got;
+        if (!g_music_end_logged) { g_music_end_logged = 1; }
+    }
+    return g_music.buf_frames > keep;
+}
+
+/* Reads one stereo frame at fractional position, linear-interpolated. */
+static void MusicSample(int16_t *l, int16_t *r) {
+    int i0 = (int)g_music.pos;
+    int i1 = i0 + 1;
+    double frac = g_music.pos - (double)i0;
+    if (i1 >= g_music.buf_frames) i1 = i0;
+    int32_t a0 = g_music.buf[i0 * 2 + 0], a1 = g_music.buf[i1 * 2 + 0];
+    int32_t b0 = g_music.buf[i0 * 2 + 1], b1 = g_music.buf[i1 * 2 + 1];
+    *l = (int16_t)((double)a0 + ((double)a1 - (double)a0) * frac);
+    *r = (int16_t)((double)b0 + ((double)b1 - (double)b0) * frac);
+}
+
+extern "C" int XenonAudio_MusicPlay(const void *ogg_data, unsigned len, const char *name) {
+    (void)name;
+    MusicClose();
+    if (!ogg_data || len == 0) return 0;
+
+    unsigned char *copy = (unsigned char *)malloc(len);
+    if (!copy) return 0;
+    memcpy(copy, ogg_data, len);
+
+    int err = 0;
+    stb_vorbis *dec = stb_vorbis_open_memory(copy, (int)len, &err, 0);
+    if (!dec) { free(copy); return 0; }
+
+    unsigned ch = 0, rate = 0;
+    stb_vorbis_info info = stb_vorbis_get_info(dec);
+    ch = (unsigned)info.channels;
+    rate = info.sample_rate;
+    if (rate == 0) rate = OUT_RATE;
+
+    g_music.dec = dec;
+    g_music.data = copy;
+    g_music.len = len;
+    g_music.src_rate = rate;
+    g_music.channels = (int)ch;
+    g_music.step = (double)rate / (double)OUT_RATE;
+    g_music.pos = 0.0;
+    g_music.buf_frames = 0;
+    g_music.vol = 128;
+    g_music.active = 1;
+    g_music_end_logged = 0;
+    MusicRefill();
+    return 1;
+}
+
+extern "C" void XenonAudio_MusicStop(void) { MusicClose(); }
+
+extern "C" void XenonAudio_MusicSetVolume(int vol) {
+    if (vol < 0) vol = 0; else if (vol > 128) vol = 128;
+    g_music.vol = vol;
+}
+
+extern "C" int XenonAudio_MusicIsPlaying(void) {
+    return g_music.active && g_music.dec && g_music.buf_frames > 0;
+}
+
+/* Adds the music track into the mix buffer at the current volume. */
+static void MixMusic(int16_t *out, int frames) {
+    if (!g_music.active || !g_music.dec || g_music.vol == 0) return;
+
+    for (int f = 0; f < frames; ++f) {
+        if (g_music.pos >= (double)g_music.buf_frames) {
+            if (!MusicRefill()) return; /* decoder exhausted; stop mixing */
+        }
+        int16_t l, r;
+        MusicSample(&l, &r);
+        int32_t ol = out[f * 2 + 0] + (int32_t)(l * g_music.vol / 128);
+        int32_t orr = out[f * 2 + 1] + (int32_t)(r * g_music.vol / 128);
+        if (ol > 32767) ol = 32767; else if (ol < -32768) ol = -32768;
+        if (orr > 32767) orr = 32767; else if (orr < -32768) orr = -32768;
+        out[f * 2 + 0] = (int16_t)ol;
+        out[f * 2 + 1] = (int16_t)orr;
+        g_music.pos += g_music.step;
+    }
+}
+
 /* --- mixing core (host-testable) --------------------------------------- */
 
 static void MixFrames(int16_t *out, int frames) {
@@ -186,6 +340,8 @@ static void MixFrames(int16_t *out, int frames) {
             v->pos += v->step;
         }
     }
+
+    MixMusic(out, frames);
 }
 
 extern "C" void XenonAudio_Pump(void) {

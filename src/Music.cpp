@@ -245,6 +245,15 @@ void MusicClass::play(int t)
 		{
 			// musicfade = 0;
 			currentsong = t;
+			// Xbox 360: hand the embedded Ogg Vorbis track to the music channel.
+			if (currentsong >= 0 && currentsong < (int)musicTracks.size())
+			{
+				soundSystem.playMusic(&musicTracks[currentsong]);
+			}
+			else
+			{
+				soundSystem.stopMusic();
+			}
 			if (currentsong == 0 || currentsong == 7)
 			{
 				// Level Complete theme, no fade in or repeat
@@ -292,6 +301,7 @@ void MusicClass::stopmusic()
 	// musicchannel.removeEventListener(Event.SOUND_COMPLETE, stopmusic);
 	// musicchannel.stop();
 	//Mix_HaltMusic();
+	soundSystem.stopMusic();
 	currentsong = -1;
 }
 
@@ -301,6 +311,7 @@ void MusicClass::haltdasmusik()
 	// musicchannel.stop();
 	// resumesong = currentsong;
 	//Mix_HaltMusic();
+	soundSystem.stopMusic();
 	currentsong = -1;
 }
 
@@ -310,6 +321,7 @@ void MusicClass::silencedasmusik()
 	//	musicchannel.soundTransform = new SoundTransform(0);
 	//}
 	//Mix_VolumeMusic(0) ;
+	soundSystem.setMusicVolume(0);
 	musicVolume = 0;
 }
 
@@ -330,6 +342,7 @@ void MusicClass::fadeout()
 	//}
 
 	//Mix_FadeOutMusic(2000);
+	soundSystem.stopMusic();
 	currentsong = -1;
 }
 
@@ -365,6 +378,14 @@ void MusicClass::processmusic()
 
 	//if (musicfade > 0) processmusicfade();
 	//if (musicfadein > 0) processmusicfadein();
+	// Xbox 360: a pending menu/area change is actioned here.
+	if (nicefade == 1)
+	{
+		play(nicechange);
+		nicechange = -1; nicefade = 0;
+	}
+	// Apply the current music volume (0..128) to the mixer.
+	soundSystem.setMusicVolume(musicVolume);
 	/*
 	if (nicefade == 1 && Mix_PlayingMusic() == 0)
 	{
