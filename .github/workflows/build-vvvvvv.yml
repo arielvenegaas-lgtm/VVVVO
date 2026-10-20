@@ -40,8 +40,18 @@ jobs:
       - name: Verify output is a PowerPC ELF32
         run: python3 ci/verify_elf.py xenon/vvvvvv.elf32
 
-      - name: Upload ELF
+      - name: Package release ZIP (ELF + docs, no proprietary assets)
+        run: |
+          python3 tools/package_release.py --elf xenon/vvvvvv.elf32 \
+            --no-assets --out dist/vvvvvv-elf32.zip
+
+      - name: Verify ZIP layout and checksums
+        run: python3 tests/test_package_layout_host.py dist/vvvvvv-elf32.zip
+
+      - name: Upload release ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: vvvvvv-elf32
-          path: xenon/vvvvvv.elf32
+          name: vvvvvv-elf32-release
+          path: |
+            xenon/vvvvvv.elf32
+            dist/vvvvvv-elf32.zip

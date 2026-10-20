@@ -14,24 +14,46 @@
 #include <usb/usbmain.h>
 
 /* libXenon's USB mass-storage sector callbacks (tinyehci/usbstorage.c). Their
- * header drags in CFE internals, so we forward-declare the ones we use. */
+ * header drags in CFE internals, so we forward-declare the ones we use.
+ * libXenon supports up to three USB storage devices; probe all of them so the
+ * stick is found regardless of which port it is plugged into. */
 extern "C" int32_t USBStorage_Read_Sectors_0(uint32_t sector, uint32_t numSectors, void *buffer);
 extern "C" int32_t USBStorage_Write_Sectors_0(uint32_t sector, uint32_t numSectors, const void *buffer);
 extern "C" int32_t USBStorage_Inserted_0(void);
-extern "C" int32_t USBStorage_devsectors_0(void);
+extern "C" int32_t USBStorage_Read_Sectors_1(uint32_t sector, uint32_t numSectors, void *buffer);
+extern "C" int32_t USBStorage_Write_Sectors_1(uint32_t sector, uint32_t numSectors, const void *buffer);
+extern "C" int32_t USBStorage_Inserted_1(void);
+extern "C" int32_t USBStorage_Read_Sectors_2(uint32_t sector, uint32_t numSectors, void *buffer);
+extern "C" int32_t USBStorage_Write_Sectors_2(uint32_t sector, uint32_t numSectors, const void *buffer);
+extern "C" int32_t USBStorage_Inserted_2(void);
 
 /* One Fat32 instance for the whole process; the game reaches it via
  * FsVolume(). */
 static Fat32 *g_fs = 0;
 
+struct UsbDevice {
+    int32_t (*inserted)(void);
+    int32_t (*read)(uint32_t, uint32_t, void *);
+    int32_t (*write)(uint32_t, uint32_t, const void *);
+};
+
+static const UsbDevice g_devices[3] = {
+    { USBStorage_Inserted_0, USBStorage_Read_Sectors_0, USBStorage_Write_Sectors_0 },
+    { USBStorage_Inserted_1, USBStorage_Read_Sectors_1, USBStorage_Write_Sectors_1 },
+    { USBStorage_Inserted_2, USBStorage_Read_Sectors_2, USBStorage_Write_Sectors_2 },
+};
+
+/* Device backing the currently mounted volume. */
+static const UsbDevice *g_dev = 0;
+
 static int UsbRead(void *ctx, uint32_t lba, uint32_t count, void *buf) {
     (void)ctx;
-    return USBStorage_Read_Sectors_0(lba, count, buf) ? 1 : 0;
+    return (g_dev && g_dev->read(lba, count, buf)) ? 1 : 0;
 }
 
 static int UsbWrite(void *ctx, uint32_t lba, uint32_t count, const void *buf) {
     (void)ctx;
-    return USBStorage_Write_Sectors_0(lba, count, buf) ? 1 : 0;
+    return (g_dev && g_dev->write(lba, count, buf)) ? 1 : 0;
 }
 
 Fat32 *FsVolume(void) {
@@ -69,17 +91,47 @@ extern "C" int xenon_mount_fat32(void) {
      * is also called from the per-frame input poll, so a few calls here give a
      * freshly attached stick time to mount. */
     usb_init();
-    for (int i = 0; i < 32 && !USBStorage_Inserted_0(); ++i) {
+    for (int i = 0; i < 64; ++i) {
+        if (g_devices[0].inserted() || g_devices[1].inserted() ||
+            g_devices[2].inserted())
+            break;
         usb_do_poll();
     }
-    if (!USBStorage_Inserted_0()) return 0;
 
-    g_fs = Fat32_Open(UsbRead, UsbWrite, 0);
-    if (!g_fs) return 0;
-    if (!Fat32_MountVolume(g_fs)) {
-        Fat32_Close(g_fs);
-        g_fs = 0;
-        return 0;
+    /* Prefer a volume that actually contains the game data. This makes the
+     * search deterministic: "the FAT32 volume whose root has data/graphics/
+     * font.png", independent of USB port order. If none has data, keep the
+     * first mountable volume so FILESYSTEM_init() can report the missing-data
+     * error instead of pretending there is no filesystem. */
+    Fat32 *fallback = 0;
+    const UsbDevice *fallback_dev = 0;
+    for (int d = 0; d < 3; ++d) {
+        const UsbDevice *dev = &g_devices[d];
+        if (!dev->inserted()) continue;
+        g_dev = dev;
+        Fat32 *fs = Fat32_Open(UsbRead, UsbWrite, 0);
+        if (!fs) continue;
+        if (!Fat32_MountVolume(fs)) {
+            Fat32_Close(fs);
+            continue;
+        }
+        if (Fat32V_Stat(fs, "/data/graphics/font.png", 0, 0)) {
+            g_fs = fs;
+            return 1;
+        }
+        if (!fallback) {
+            fallback = fs;
+            fallback_dev = dev;
+        } else {
+            Fat32_Close(fs);
+        }
     }
-    return 1;
+
+    if (fallback) {
+        g_fs = fallback;
+        g_dev = fallback_dev;
+        return 1;
+    }
+    g_dev = 0;
+    return 0;
 }

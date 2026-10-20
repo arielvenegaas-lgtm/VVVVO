@@ -13,8 +13,10 @@ logic and replacing every XDK/Win32/SDL2 dependency with a libXenon one.
 
 - The free60 libXenon toolchain (`DEVKITXENON`), e.g. the
   `free60/libxenon` Docker image.
-- A FAT32 USB stick containing the VVVVVV `data/` tree (graphics, music,
-  sounds) and empty `user/` folders.
+- A FAT32 USB stick whose **root** contains a `data/` tree (graphics, sounds,
+  `vvvvvvmusic.vvv`). The game creates `user/` on first boot. The location of
+  the `.elf32` file does not matter; libXenon has no working directory and the
+  game opens absolute paths on the mounted volume (`/data/...`).
 
 ## Build
 
@@ -49,16 +51,53 @@ works on hardware — that still needs a console.
 
 ## Runtime layout on the USB stick
 
+The game mounts the first FAT32 USB volume (probing all three USB storage
+ports) and treats its root as the old `D:\` drive. Paths are mapped as:
+
 ```
-/data/graphics/*.png
-/data/music/*.ogg      (played: decoded by stb_vorbis)
-/data/sounds/*.wav     (played: WAV effects mixed to the DAC)
-/user/saves/
-/user/levels/
-/user/logs/
+D:\data\graphics\tiles.png  ->  /data/graphics/tiles.png
+D:\user\saves\qsave.vvv      ->  /user/saves/qsave.vvv
 ```
 
-The game's `D:\...` paths are mapped onto the mounted FAT32 volume at runtime.
+So the stick must look like this:
+
+```
+<USB ROOT>/
+  data/
+    graphics/*.png         21 files
+    sounds/*.wav           28 files
+    vvvvvvmusic.vvv
+  user/                    created on first boot
+    saves/  levels/  logs/
+  vvvvvv.elf32             anywhere (root or a folder)
+```
+
+The 50 required data files are listed in `release/required-assets.txt`.
+They are **not** included: VVVVVV's art, sounds and music are proprietary.
+For personal use, get the official free Make and Play data from
+<https://thelettervsixtim.es/makeandplay/> and extract its `data.zip`
+**into** the `data/` folder on the stick.
+
+`data/music/*.ogg`, `data/BinaryMusic.vvv` and `data/mmmmmm.vvv` are optional;
+this port plays the packed `vvvvvvmusic.vvv` via stb_vorbis.
+
+## Release packaging
+
+`./build.sh` runs the tests, cross-builds, verifies the ELF and writes
+`dist/vvvvvv-elf32.zip` (ELF + README/NOTICE + the required-asset manifest; no
+proprietary assets). To validate and bundle your own data into a personal ZIP:
+
+```sh
+python3 tools/package_release.py --check /path/to/data        # report only
+VVVVVV_DATA=/path/to/data ./build.sh                          # personal ZIP
+python3 tools/package_release.py --data /path/to/data \
+    --out dist/vvvvvv-elf32-with-data.zip
+```
+
+The tool lists every required file, fails if any is missing/corrupt, and
+refuses to build an incomplete package. `tests/test_asset_manifest_host.py`
+keeps the manifest in sync with the asset paths in the source, and
+`tests/test_package_layout_host.py` checks a produced ZIP.
 
 ## Repository layout
 
@@ -75,7 +114,9 @@ xenon/          libXenon platform layer + SDL2 shim + build
   include/      (generated headers)
 display_test/   standalone Xenos colour-bar diagnostic
 tests/          host-side tests (FAT32 vs real image, colour/blend, WAV, mixer,
-                Ogg Vorbis decode)
+                Ogg Vorbis decode, asset manifest, release ZIP layout)
+release/        required/optional asset manifest + README/NOTICE templates
+tools/          package_release.py (validate assets, build release ZIP)
 reference/      original XVVVVX files, kept for diffing the port
 ```
 

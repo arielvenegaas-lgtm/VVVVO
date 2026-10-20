@@ -94,4 +94,8 @@ gcc -O2 -g -Wall -Wextra -o "$work/test_mount_reads_host" \
 "$work/test_mount_reads_host" "$bigimg"
 
 echo
+echo "== test_asset_manifest_host (release manifest matches source) =="
+python3 "$here/test_asset_manifest_host.py"
+
+echo
 bash "$here/test_startup_order_host.sh"

@@ -131,14 +131,19 @@ void VvvvoGfx_LoadScreen(int pct, const char *stage) {
     Gfx_Present(g_gfx);
 }
 
-void VvvvoGfx_ErrorScreen(const char *title, const char *detail) {
+void VvvvoGfx_ErrorScreen(const char *title, const char *line1,
+                          const char *line2) {
     if (!g_gfx) return;
     int dh = (int)Gfx_Height(g_gfx);
 
     Fill(0xFF200000u);
-    DrawCentered(title ? title : "ERROR", dh / 4, 4, 0xFFFF6060u);
-    if (detail && *detail) DrawCentered(detail, dh / 4 + 4 * 9 + 24, 2, 0xFFFFFFFFu);
-    DrawCentered("Check the USB drive and data/ folder.", dh - dh / 4, 2, 0xFFFFC040u);
+    int y = dh / 4;
+    DrawCentered(title ? title : "ERROR", y, 4, 0xFFFF6060u);
+    y += 4 * 9 + 28;
+    if (line1 && *line1) { DrawCentered(line1, y, 2, 0xFFFFFFFFu); y += 2 * 9 + 12; }
+    if (line2 && *line2) { DrawCentered(line2, y, 2, 0xFFFFFFFFu); y += 2 * 9 + 12; }
+    DrawCentered("Put the game's data/ folder at the USB stick root.",
+                 dh - dh / 4, 2, 0xFFFFC040u);
     Gfx_Present(g_gfx);
 }
 

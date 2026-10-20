@@ -30,5 +30,6 @@ void BootCheckpoint(int n);
 void VvvvoGfx_LoadScreen(int pct, const char *stage);
 
 // Full-screen readable error (e.g. missing/corrupt assets). Clears and presents
-// the scan-out. `detail` may be NULL.
-void VvvvoGfx_ErrorScreen(const char *title, const char *detail);
+// the scan-out. `line1`/`line2` may be NULL.
+void VvvvoGfx_ErrorScreen(const char *title, const char *line1,
+                          const char *line2);

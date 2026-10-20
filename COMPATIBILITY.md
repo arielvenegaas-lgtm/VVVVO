@@ -58,8 +58,27 @@ dependency with a libXenon one.
 > **`fs::*` targets the mounted volume.** The inline helpers in
 > `src/filesystem.h` pass `FsVolume()` to the `Fat32V_*` API; passing `NULL` made
 > every call a no-op (so `fs::exists()` was always false and logging silently
-> did nothing). *(All of the above still needs hardware confirmation; the
-> ordering, mount-cost and `fs::` behaviour are covered by host tests.)*
+> did nothing).
+>
+> **Asset path is absolute, not relative to the ELF.** libXenon has no current
+> directory. The game's `D:\\...` literals are mapped by `MapPath()` to
+> volume-relative POSIX paths (`/data/graphics/font.png`) and opened directly on
+> the mounted FAT32 volume. `xenon_mount_fat32()` probes all three libXenon USB
+> storage devices and prefers the volume whose root contains
+> `data/graphics/font.png`; if none does, it keeps the first mountable volume so
+> the missing-data error can be shown. Consequently the USB stick **root** must
+> contain `data/`, and the `.elf32` may live anywhere. Internal HDD is not
+> mounted (libXenon has no HDD filesystem driver in this build).
+>
+> **Asset validation and packaging.** At startup all 21 required PNGs are
+> checked; failures show a readable error naming the missing files. Release
+> packaging (`tools/package_release.py`) validates the 50 required assets
+> (21 PNGs, 28 WAVs, `vvvvvvmusic.vvv`), refuses incomplete input, and the
+> public ZIP contains only the ELF plus documentation because those assets are
+> proprietary. `tests/test_asset_manifest_host.py` and
+> `tests/test_package_layout_host.py` guard the manifest and ZIP.
+> *(All of the above still needs hardware confirmation; the ordering, mount
+> cost, path mapping and packaging are covered by host/source tests.)*
 
 ---
 

@@ -42,4 +42,18 @@ fi
 echo "==> verify ELF"
 python3 ci/verify_elf.py "$elf"
 
+# Package the release. VVVVVV's assets are proprietary, so the default public
+# ZIP contains only the ELF + documentation. Point VVVVVV_DATA at a complete
+# data/ tree to build a personal package that also validates and bundles it.
+if [ "${SKIP_PACKAGE:-0}" != "1" ]; then
+    echo "==> package release"
+    if [ -n "${VVVVVV_DATA:-}" ]; then
+        python3 tools/package_release.py --elf "$elf" --data "$VVVVVV_DATA" \
+            --out dist/vvvvvv-elf32-with-data.zip
+    else
+        python3 tools/package_release.py --elf "$elf" --no-assets \
+            --out dist/vvvvvv-elf32.zip
+    fi
+fi
+
 echo "==> done"

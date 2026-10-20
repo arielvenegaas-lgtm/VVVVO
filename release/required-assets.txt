@@ -1,0 +1,66 @@
+# Required VVVVVV runtime assets (paths relative to the data/ folder).
+#
+# These files are NOT included in this repository or in the public release ZIP:
+# VVVVVV's art, graphics and music are proprietary (see NOTICE.md). Obtain them
+# for personal use from the official Make and Play Edition:
+#   https://thelettervsixtim.es/makeandplay/
+# Extract that data.zip INTO a folder named data/ on the USB stick.
+#
+# tools/package_release.py validates every entry below and refuses to build a
+# package with assets if any file is missing.
+
+# --- graphics (loaded by src/GraphicsResources.cpp) ---
+graphics/covered.png
+graphics/elephant.png
+graphics/ending.png
+graphics/entcolours.png
+graphics/flipgamecomplete.png
+graphics/fliplevelcomplete.png
+graphics/flipsprites.png
+graphics/font.png
+graphics/fontmask.png
+graphics/gamecomplete.png
+graphics/levelcomplete.png
+graphics/minimap.png
+graphics/site.png
+graphics/site2.png
+graphics/site3.png
+graphics/site4.png
+graphics/sprites.png
+graphics/teleporter.png
+graphics/tiles.png
+graphics/tiles2.png
+graphics/tiles3.png
+
+# --- sound effects (loaded by src/SoundSystem.cpp / src/Music.cpp) ---
+sounds/blip.wav
+sounds/blip2.wav
+sounds/coin.wav
+sounds/combine.wav
+sounds/countdown.wav
+sounds/crash.wav
+sounds/crashing.wav
+sounds/crew1.wav
+sounds/crew2.wav
+sounds/crew3.wav
+sounds/crew4.wav
+sounds/crew5.wav
+sounds/crew6.wav
+sounds/crumble.wav
+sounds/gamesaved.wav
+sounds/go.wav
+sounds/hurt.wav
+sounds/jump.wav
+sounds/jump2.wav
+sounds/newrecord.wav
+sounds/preteleport.wav
+sounds/rescue.wav
+sounds/save.wav
+sounds/souleyeminijingle.wav
+sounds/teleport.wav
+sounds/terminal.wav
+sounds/trophy.wav
+sounds/vanish.wav
+
+# --- music pack (loaded by src/Music.cpp) ---
+vvvvvvmusic.vvv

@@ -171,34 +171,58 @@ int main()
     KeyPoll key;
     key.isActive = true;
 
-    /* Validate the core assets before entering the game. A missing or corrupt
-       PNG used to show up only as an unexplained black screen, because the
-       bitmap font and menu sprites silently became blank surfaces. */
+    /* Validate every required graphic before entering the game. A missing or
+       corrupt PNG used to show up only as an unexplained black screen, because
+       the bitmap font and menu/map sprites silently became blank surfaces. The
+       list below must match release/required-assets.txt (guarded by
+       tests/test_asset_manifest_host.py). */
     {
         struct { const char *name; SDL_Surface *s; } need[] = {
-            {"tiles.png",      graphics.grphx.im_tiles},
-            {"tiles2.png",     graphics.grphx.im_tiles2},
-            {"sprites.png",    graphics.grphx.im_sprites},
-            {"entcolours.png", graphics.grphx.im_entcolours},
-            {"font.png",       graphics.grphx.im_bfont},
-            {"teleporter.png", graphics.grphx.im_teleporter},
-            {"image0.png",     graphics.grphx.im_image0},
-            {"image1.png",     graphics.grphx.im_image1},
-            {"image2.png",     graphics.grphx.im_image2},
+            {"tiles.png",            graphics.grphx.im_tiles},
+            {"tiles2.png",           graphics.grphx.im_tiles2},
+            {"tiles3.png",           graphics.grphx.im_tiles3},
+            {"entcolours.png",       graphics.grphx.im_entcolours},
+            {"sprites.png",          graphics.grphx.im_sprites},
+            {"flipsprites.png",      graphics.grphx.im_flipsprites},
+            {"font.png",             graphics.grphx.im_bfont},
+            {"fontmask.png",         graphics.grphx.im_bfontmask},
+            {"teleporter.png",       graphics.grphx.im_teleporter},
+            {"levelcomplete.png",    graphics.grphx.im_image0},
+            {"minimap.png",          graphics.grphx.im_image1},
+            {"covered.png",          graphics.grphx.im_image2},
+            {"elephant.png",         graphics.grphx.im_image3},
+            {"gamecomplete.png",     graphics.grphx.im_image4},
+            {"fliplevelcomplete.png",graphics.grphx.im_image5},
+            {"flipgamecomplete.png", graphics.grphx.im_image6},
+            {"site.png",             graphics.grphx.im_image7},
+            {"site2.png",            graphics.grphx.im_image8},
+            {"site3.png",            graphics.grphx.im_image9},
+            {"ending.png",           graphics.grphx.im_image10},
+            {"site4.png",            graphics.grphx.im_image11},
         };
-        char missing[180];
-        missing[0] = '\0';
-        int nmiss = 0;
+        char names[220];
+        names[0] = '\0';
+        int nmiss = 0, nshown = 0;
         for (unsigned i = 0; i < sizeof(need) / sizeof(need[0]); ++i) {
             if (need[i].s) continue;
             nmiss++;
-            if (strlen(missing) + strlen(need[i].name) + 2 < sizeof(missing)) {
-                if (missing[0]) strcat(missing, " ");
-                strcat(missing, need[i].name);
+            if (nshown < 5) {
+                if (nshown) strcat(names, " ");
+                strncat(names, need[i].name,
+                        sizeof(names) - strlen(names) - 1);
+                nshown++;
             }
         }
         if (nmiss) {
-            VvvvoGfx_ErrorScreen("Missing or corrupt assets", missing);
+            char detail[256];
+            if (nmiss > nshown)
+                snprintf(detail, sizeof(detail), "%s (+%d more)",
+                         names, nmiss - nshown);
+            else
+                snprintf(detail, sizeof(detail), "%s", names);
+            VvvvoGfx_ErrorScreen("Missing game data",
+                                 "Extract the game data into data/ at the USB root.",
+                                 detail);
             while (!key.quitProgram) { SDL_Delay(100); key.Poll(); }
             SDL_Quit();
             return 1;

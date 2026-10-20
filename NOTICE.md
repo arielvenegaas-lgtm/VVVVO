@@ -15,6 +15,9 @@
   at your option). Used unmodified; `xenon_stb_vorbis.c` / `stb_vorbis.h` are
   thin build wrappers.
 - The VVVVVV art, graphics and music are proprietary and are NOT included in
-  this repository. You must supply your own `data/` tree from a legitimate
-  copy of the game.
+  this repository or in the public release ZIP. You must supply your own
+  `data/` tree for personal use from the official Make and Play Edition
+  (https://thelettervsixtim.es/makeandplay/). `release/required-assets.txt`
+  lists the exact files; `tools/package_release.py` validates them and refuses
+  to build an incomplete package.
 - No Microsoft XDK code or libraries are included or required.

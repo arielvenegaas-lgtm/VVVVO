@@ -21,3 +21,8 @@ user/
 # Editor / OS noise
 .DS_Store
 *~
+
+# Release packages (published as GitHub release assets)
+dist/
+__pycache__/
+*.pyc
