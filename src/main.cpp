@@ -1,6 +1,7 @@
 #include <SDL.h>
 #include "filesystem.h"
 #include "game_gfx.h"
+#include "xenon_audio.h"
 
 #include "states/Preloader.h"
 
@@ -309,6 +310,7 @@ int main()
         }
 
         music.processmusic();
+        XenonAudio_Pump();
         graphics.processfade();
         game.gameclock();
         gameScreen.FlipScreen();

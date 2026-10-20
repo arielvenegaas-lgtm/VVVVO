@@ -1,4 +1,5 @@
 #include "sdlshim.h"
+#include "sdlblit.h"
 #include "gfx.h"
 #include "input.h"
 #include <sys/time.h>
@@ -102,8 +103,8 @@ int SDL_FillRect(SDL_Surface *dst, const SDL_Rect *rect, Uint32 color) {
   }
   return 0;
 }
-/* x / 255 for x <= 65535 without a divide. */
-static inline Uint32 Div255(Uint32 x) { return (x + (x >> 8)) >> 8; }
+/* x / 255 for x <= 65535 without a divide (exact at multiples of 255). */
+static inline Uint32 Div255(Uint32 x) { return sdl_div255(x); }
 
 /* SDL2 uses the *source* surface's blend mode and converts pixel formats
  * during the blit. The game relies on both: images are RGBA8888 (R in the high

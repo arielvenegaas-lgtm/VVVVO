@@ -27,7 +27,7 @@ INCLUDES := ../src ../lodepng ../tinyxml
 # auto-vectorizer (turned on at -O3) emits standard AltiVec/VMX code that the
 # Xenon's non-standard VMX128 ISA executes incorrectly, corrupting the
 # framebuffer.
-CFLAGS   = -g -O2 -fno-tree-vectorize -w $(MACHDEP) $(INCLUDE)
+CFLAGS   = -g -O2 -fno-tree-vectorize -w $(MACHDEP) -DXENON $(INCLUDE)
 CXXFLAGS = $(CFLAGS) -include $(CURDIR)/../source/global_compat.h
 
 LDFLAGS  = -g $(MACHDEP) -Wl,--gc-sections -Wl,-Map,$(notdir $@).map -Wl,--wrap=fopen -Wl,--wrap=remove
@@ -53,7 +53,7 @@ GAME_SRC := \
 	Final.o Lab.o Other.o SpaceStation.o Tower.o Warp.o \
 	tinystr.o tinyxml.o tinyxmlerror.o tinyxmlparser.o
 
-PLATFORM_SRC := sdlstub.o game_gfx.o gfx.o input.o platform_fs.o platform_file.o platform_misc.o fat32.o
+PLATFORM_SRC := sdlstub.o game_gfx.o gfx.o input.o platform_fs.o platform_file.o platform_misc.o xenon_audio.o wav.o fat32.o
 
 export OFILES   := $(PLATFORM_SRC) $(GAME_SRC)
 

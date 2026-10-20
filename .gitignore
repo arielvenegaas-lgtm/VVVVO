@@ -11,6 +11,9 @@ poc/build/
 *.d
 *.s
 
+# Locally preserved diagnostic binaries (dated per milestone), never committed
+prebuilt/
+
 # User-supplied, proprietary game assets (never commit)
 data/
 user/

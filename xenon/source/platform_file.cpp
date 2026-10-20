@@ -156,3 +156,22 @@ extern "C" int __wrap_remove(const char *path) {
     if (!Fat32V_Exists(FsVolume(), mapped)) { errno = ENOENT; return -1; }
     return Fat32V_Unlink(FsVolume(), mapped) ? 0 : -1;
 }
+
+/* Reads an entire file (already mapped to a volume-relative POSIX path) into a
+ * freshly malloc'd buffer. Returns bytes read (>=0) or -1. Used by the audio
+ * backend to load WAV sound effects. `*out_buf` is set to NULL on failure. */
+extern "C" long FsReadWhole(const char *mapped_path, void **out_buf) {
+    if (out_buf) *out_buf = 0;
+    if (!mapped_path || !out_buf) return -1;
+    if (!xenon_mount_fat32()) return -1;
+    Fat32 *fs = FsVolume();
+    uint32_t size = 0;
+    int isdir = 0;
+    if (!Fat32V_Stat(fs, mapped_path, &size, &isdir) || isdir || size == 0) return -1;
+    void *buf = malloc(size);
+    if (!buf) return -1;
+    long got = Fat32V_ReadFile(fs, mapped_path, buf, size);
+    if (got < 0) { free(buf); return -1; }
+    *out_buf = buf;
+    return got;
+}

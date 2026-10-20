@@ -5,8 +5,9 @@ A bare-metal port of **VVVVVV** to the Xbox 360, built with
 Original port [XVVVVX](https://github.com/BttrDrgn/XVVVVX), reusing its game
 logic and replacing every XDK/Win32/SDL2 dependency with a libXenon one.
 
-> **Status:** graphics, input and (FAT32) filesystem are in place; **audio is a
-> silent stub** in the current milestone. See [COMPATIBILITY.md](COMPATIBILITY.md).
+> **Status:** graphics, input, FAT32 filesystem and **sound effects** are in
+> place; music is silent (the soundtrack is Ogg Vorbis). See
+> [COMPATIBILITY.md](COMPATIBILITY.md).
 
 ## Requirements
 
@@ -36,8 +37,8 @@ docker run --rm -v "$PWD":/app -w /app free60/libxenon:latest \
 
 ```
 /data/graphics/*.png
-/data/music/*.wav      (not played yet)
-/data/sounds/*.wav     (not played yet)
+/data/music/*.wav      (not played — soundtrack is Ogg Vorbis)
+/data/sounds/*.wav     (played: WAV effects mixed to the DAC)
 /user/saves/
 /user/levels/
 /user/logs/
@@ -53,9 +54,12 @@ lodepng/        PNG decoder (zlib license)
 tinyxml/        XML parser (zlib license)
 xenon/          libXenon platform layer + SDL2 shim + build
   source/       gfx (Xenos), input (USB pad), fat32, sdlstub, game_gfx,
-                platform_file (fopen/remove over FAT32)
+                platform_file (fopen/remove over FAT32),
+                wav (PCM decoder), xenon_audio (xenon_sound mixer),
+                sdlblit (shared pixel/blend math)
   include/      (generated headers)
 display_test/   standalone Xenos colour-bar diagnostic
+tests/          host-side tests (FAT32 vs real image, colour/blend, WAV)
 reference/      original XVVVVX files, kept for diffing the port
 ```
 
